@@ -27,6 +27,7 @@ Technologies
 
 
 For Later
+- when Android is ready - we may implement web-app with the same functionality. You know, like instagram, where they have moobile apps, but web-app has similar functionality.
 - we will have backend to support cloud storage, share and view. Mobile apps will be able to upload data in cloud and share specific cards and collections with other users
 - we will have web-app to access backend
 - Auth (email and 1 time password code for beginning)
