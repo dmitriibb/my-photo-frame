@@ -81,10 +81,10 @@ The main risks to verify early are whether the square preview matches the saved 
 1. Start `web-app/` with a fresh decision on Flutter web versus a web-native UI, based on browser camera/audio behavior, storage needs, and sharing requirements. Keep the card/archive format compatible.
 2. Add `backend/` when cloud storage, upload, remote viewing/sharing, and email one-time-code authentication are in scope. Define access controls and sync behavior at that time.
 
-## Decisions needed before implementation
+## Implementation decisions
 
-- **Unknown:** minimum Android version and target devices. Needed to choose package versions and test devices.
-- **Unknown:** maximum voice-note duration. Needed to finish recording behavior and storage limits.
+- **Resolved:** minimum Android version is API 24, based on the selected Flutter camera and storage packages. Use an emulator during early implementation; Dima's Xiaomi 14 is available for physical-device testing when the app is ready enough to install.
+- **Resolved:** voice notes have a maximum duration of 60 seconds.
 
 ## Technical references
 

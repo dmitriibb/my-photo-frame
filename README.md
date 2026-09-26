@@ -2,7 +2,7 @@
 
 My Photo Frame is a private gallery for memories. A memory is a square photo presented as a Polaroid-style card with a visible date, optional short text, optional voice note, and a location marker when location data is available.
 
-The project is in the planning stage. The source idea is [idea.md](idea.md), and the implementation sequence is in [plan.main.md](plan.main.md).
+Android implementation has begun in [mobile-app/](mobile-app/). The source idea is [idea.md](idea.md), and the implementation sequence is in [plan.main.md](plan.main.md).
 
 ## Product direction
 
@@ -24,19 +24,19 @@ The choice of Flutter for Android does **not** decide the later web stack. Brows
 idea.md          Original product idea
 plan.main.md     Android-first implementation plan
 AGENTS.md        Instructions for agents working in this repository
-mobile-app/      Flutter Android app (to be created during implementation)
+mobile-app/      Flutter Android app
 web-app/         Future web app
 backend/         Future cloud API and storage
 ```
 
-Only the planning documents exist now. The future application directories are not scaffolded yet.
+The first two implementation milestones provide the local database, private media storage, camera capture, square photo processing, optional text and voice notes (up to 60 seconds), and the initial Default gallery and detail screens. Collection management and card lifecycle are next in the plan.
 
 ## Assumptions and open decisions
 
 - **Assumption:** A location icon means the card actually contains location coordinates, not merely that device location is enabled. Location is optional and requires permission for new captures.
 - **Assumption:** If an imported photo has no usable capture date in its metadata, use a documented fallback date so every card still shows a date.
 - **Assumption:** The photo, displayed date, and collection assignment are fixed after the first save; the 24-hour edit window applies to text, audio, and removing optional inputs.
-- **Unknown:** The minimum Android version, target devices, and maximum voice-note duration.
+- **Decision:** Android API 24 minimum and a 60-second voice-note limit. Use an emulator during early implementation and Dima's Xiaomi 14 for later physical-device verification.
 
 ## References behind the platform choice
 

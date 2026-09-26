@@ -1,0 +1,106 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image;
+import 'package:my_photo_frame/main.dart';
+import 'package:my_photo_frame/src/data/app_database.dart';
+import 'package:my_photo_frame/src/data/card_repository.dart';
+import 'package:my_photo_frame/src/data/models.dart';
+import 'package:my_photo_frame/src/gallery/deleted_screen.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+void main() {
+  sqfliteFfiInit();
+
+  testWidgets('creating a collection closes the dialog and selects it', (
+    tester,
+  ) async {
+    late Directory directory;
+    late AppDatabase database;
+    late CardRepository repository;
+    await tester.runAsync(() async {
+      directory = await Directory.systemTemp.createTemp('collection_dialog_');
+      database = await AppDatabase.open(
+        p.join(directory.path, 'cards.db'),
+        factory: databaseFactoryFfiNoIsolate,
+      );
+      repository = CardRepository(database, directory);
+      await repository.initialize();
+    });
+
+    await tester.pumpWidget(
+      MyPhotoFrame(
+        repository: repository,
+        draftsDirectory: Directory(p.join(directory.path, 'drafts')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('New collection'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Italy trip');
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Italy trip'), findsOneWidget);
+    expect(await tester.runAsync(repository.listCollections), hasLength(2));
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(() async {
+      await database.close();
+      await directory.delete(recursive: true);
+    });
+  });
+
+  testWidgets('restoring a card refreshes Deleted without a framework error', (
+    tester,
+  ) async {
+    late Directory directory;
+    late AppDatabase database;
+    late CardRepository repository;
+    late MemoryCard card;
+    await tester.runAsync(() async {
+      directory = await Directory.systemTemp.createTemp('deleted_screen_');
+      database = await AppDatabase.open(
+        p.join(directory.path, 'cards.db'),
+        factory: databaseFactoryFfiNoIsolate,
+      );
+      repository = CardRepository(database, directory);
+      await repository.initialize();
+      final photo = File(p.join(directory.path, 'sample.jpg'));
+      await photo.writeAsBytes(
+        image.encodeJpg(image.Image(width: 2, height: 2)),
+      );
+      card = await repository.saveCard(
+        collectionId: Collection.defaultId,
+        processedPhoto: photo,
+        photoDate: DateTime.utc(2025),
+        photoDateSource: PhotoDateSource.capture,
+      );
+      await repository.softDeleteCard(card.id);
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(home: DeletedScreen(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore'));
+    await tester.runAsync(() async {
+      for (var attempt = 0; attempt < 20; attempt++) {
+        if ((await repository.getCard(card.id))?.deletedAt == null) break;
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('No deleted cards.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(() async {
+      await database.close();
+      await directory.delete(recursive: true);
+    });
+  });
+}
