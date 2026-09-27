@@ -28,3 +28,15 @@
 - Made taps above or below the card dismiss the modal while retaining card actions and content.
 - Verified opening and backdrop dismissal in a widget test and on the Android emulator.
 - Flutter analysis, all 22 tests, and the debug APK build pass.
+
+## Checkpoint 5
+- Added horizontal card swipes in the open-card modal, following the current collection's gallery order.
+- A left or right swipe past the last card in that direction closes the modal.
+- Added slide and tilt motion, stopped voice playback on navigation, and reset photo zoom for each card.
+- Verified both directions and both end boundaries in widget tests; Flutter analysis, all 23 tests, and the debug APK build pass.
+
+## Checkpoint 6
+- The next card appears behind the current card during a left swipe.
+- During a right swipe, the current card shrinks while the previous card enters over it from the left.
+- Incoming cards stay within the current card's height, then animate to their full height after becoming active.
+- Verified layering and height changes in widget tests and on the Android emulator; analysis, all 24 tests, and the debug APK build pass.

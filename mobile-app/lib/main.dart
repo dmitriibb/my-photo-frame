@@ -196,12 +196,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (mounted) _refreshCards();
   }
 
-  Future<void> _openDetail(MemoryCard card) async {
+  Future<void> _openDetail(MemoryCard card, List<MemoryCard> cards) async {
     await showDialog<bool>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.8),
       builder: (_) => CardDetailScreen(
         card: card,
+        cards: cards,
         repository: widget.repository,
         draftsDirectory: widget.draftsDirectory,
       ),
@@ -422,7 +423,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           onColumnsChanged: (columns) =>
               setState(() => _galleryColumns = columns),
           photoFile: widget.repository.photoFile,
-          onCardTap: _openDetail,
+          onCardTap: (card) => _openDetail(card, cards),
         );
       },
     ),
