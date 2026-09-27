@@ -14,7 +14,9 @@ import 'src/data/app_database.dart';
 import 'src/data/card_repository.dart';
 import 'src/data/models.dart';
 import 'src/gallery/card_detail_screen.dart';
+import 'src/gallery/collection_grid.dart';
 import 'src/gallery/deleted_screen.dart';
+import 'src/gallery/gallery_grid_config.dart';
 import 'src/capture/camera_screen.dart';
 import 'src/capture/draft_screen.dart';
 import 'src/media/import_metadata.dart';
@@ -102,9 +104,11 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   late Future<List<MemoryCard>> _cards;
   List<Collection> _collections = [];
   String _selectedCollectionId = Collection.defaultId;
+  int _galleryColumns = GalleryGridConfig.defaultColumns;
   bool _importing = false;
 
   @override
@@ -193,13 +197,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openDetail(MemoryCard card) async {
-    await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => CardDetailScreen(
-          card: card,
-          repository: widget.repository,
-          draftsDirectory: widget.draftsDirectory,
-        ),
+    await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.8),
+      builder: (_) => CardDetailScreen(
+        card: card,
+        repository: widget.repository,
+        draftsDirectory: widget.draftsDirectory,
       ),
     );
     if (mounted) _refreshCards();
@@ -290,16 +294,93 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    key: _scaffoldKey,
+    drawer: Drawer(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
+              child: Text(
+                'My Photo Frame',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.home_outlined),
+              title: const Text('Home'),
+              selected: true,
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_photo_alternate_outlined),
+              title: const Text('Import'),
+              onTap: _importing
+                  ? null
+                  : () {
+                      Navigator.pop(context);
+                      _importPhoto();
+                    },
+            ),
+            ListTile(
+              leading: const Icon(Icons.archive_outlined),
+              title: const Text('Export'),
+              onTap: () {
+                Navigator.pop(context);
+                _exportCollection();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Deleted'),
+              onTap: () {
+                Navigator.pop(context);
+                _openDeleted();
+              },
+            ),
+            const Spacer(),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Info'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute(builder: (_) => const InfoScreen()),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
     appBar: AppBar(
+      leading: IconButton(
+        tooltip: 'Menu',
+        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        icon: const Icon(Icons.menu),
+      ),
       title: PopupMenuButton<String>(
         tooltip: 'Choose collection',
         onSelected: (id) {
+          if (id == '_add_new') {
+            _createCollection();
+            return;
+          }
           _selectedCollectionId = id;
           _refreshCards();
         },
         itemBuilder: (_) => [
           for (final collection in _collections)
             PopupMenuItem(value: collection.id, child: Text(collection.name)),
+          const PopupMenuDivider(),
+          const PopupMenuItem(
+            value: '_add_new',
+            child: Row(
+              children: [Icon(Icons.add), SizedBox(width: 12), Text('Add new')],
+            ),
+          ),
         ],
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -315,33 +396,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
         ),
       ),
-      actions: [
-        IconButton(
-          tooltip: 'Export collection',
-          onPressed: _exportCollection,
-          icon: const Icon(Icons.archive_outlined),
-        ),
-        IconButton(
-          tooltip: 'Import photo',
-          onPressed: _importing ? null : _importPhoto,
-          icon: const Icon(Icons.add_photo_alternate_outlined),
-        ),
-        IconButton(
-          tooltip: 'New collection',
-          onPressed: _createCollection,
-          icon: const Icon(Icons.create_new_folder_outlined),
-        ),
-        IconButton(
-          tooltip: 'Deleted',
-          onPressed: _openDeleted,
-          icon: const Icon(Icons.delete_outline),
-        ),
-      ],
     ),
-    floatingActionButton: FloatingActionButton.extended(
+    floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    floatingActionButton: FloatingActionButton(
+      tooltip: 'Take a photo',
       onPressed: _openCamera,
-      icon: const Icon(Icons.camera_alt_outlined),
-      label: const Text('Take a photo'),
+      child: const Icon(Icons.camera_alt_outlined),
     ),
     body: FutureBuilder<List<MemoryCard>>(
       future: _cards,
@@ -356,51 +416,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (cards.isEmpty) {
           return const Center(child: Text('Your memories will appear here.'));
         }
-        return ListView.builder(
-          padding: const EdgeInsets.all(20),
-          itemCount: cards.length,
-          itemBuilder: (context, index) {
-            final card = cards[index];
-            return Card(
-              margin: const EdgeInsets.only(bottom: 24),
-              color: Colors.white,
-              child: InkWell(
-                onTap: () => _openDetail(card),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AspectRatio(
-                        aspectRatio: 1,
-                        child: Image.file(
-                          widget.repository.photoFile(card),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const Center(
-                            child: Icon(Icons.broken_image_outlined),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        card.displayDate,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      if (card.text != null) ...[
-                        const SizedBox(height: 8),
-                        Text(card.text!),
-                      ],
-                      if (card.audioPath != null) const Icon(Icons.mic_rounded),
-                      if (card.latitude != null && card.longitude != null)
-                        const Icon(Icons.location_on_outlined),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
+        return CollectionGrid(
+          cards: cards,
+          columns: _galleryColumns,
+          onColumnsChanged: (columns) =>
+              setState(() => _galleryColumns = columns),
+          photoFile: widget.repository.photoFile,
+          onCardTap: _openDetail,
         );
       },
+    ),
+  );
+}
+
+class InfoScreen extends StatelessWidget {
+  const InfoScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Info')),
+    body: const Padding(
+      padding: EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('My Photo Frame', style: TextStyle(fontSize: 24)),
+          SizedBox(height: 16),
+          Text(
+            'Keep your favorite moments as photo cards with optional text and voice notes.',
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Your cards stay on this device until you choose to export them.',
+          ),
+        ],
+      ),
     ),
   );
 }

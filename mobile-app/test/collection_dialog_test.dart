@@ -37,7 +37,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('New collection'));
+    await tester.tap(find.byTooltip('Choose collection'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add new'), findsOneWidget);
+    await tester.tap(find.text('Add new'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Italy trip');
     await tester.tap(find.text('Create'));
@@ -46,6 +49,27 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Italy trip'), findsOneWidget);
     expect(await tester.runAsync(repository.listCollections), hasLength(2));
+
+    final cameraButton = find.byType(FloatingActionButton);
+    expect(cameraButton, findsOneWidget);
+    expect(find.text('Take a photo'), findsNothing);
+    final buttonCenter = tester.getCenter(cameraButton);
+    expect(
+      buttonCenter.dx,
+      closeTo(tester.getSize(find.byType(Scaffold).first).width / 2, 1),
+    );
+
+    await tester.tap(find.byTooltip('Menu'));
+    await tester.pumpAndSettle();
+    for (final item in ['Home', 'Import', 'Export', 'Deleted', 'Info']) {
+      expect(find.text(item), findsOneWidget);
+    }
+    await tester.tap(find.text('Info'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Your cards stay on this device'),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox());
     await tester.runAsync(() async {

@@ -33,6 +33,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   StreamSubscription<PlayerState>? _subscription;
   bool _playing = false;
   bool _exportingPhoto = false;
+  bool _showActions = false;
   late MemoryCard _card;
 
   @override
@@ -150,6 +151,46 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
     );
   }
 
+  void _selectAction(Future<void> Function() action) {
+    setState(() => _showActions = false);
+    unawaited(action());
+  }
+
+  Widget _actionMenu() => Material(
+    color: Colors.white,
+    elevation: 8,
+    borderRadius: BorderRadius.circular(12),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 280),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: const Text('Export card archive'),
+            onTap: () => _selectAction(_exportCard),
+          ),
+          ListTile(
+            leading: const Icon(Icons.save_alt_outlined),
+            title: const Text('Export photo to gallery'),
+            onTap: _exportingPhoto ? null : () => _selectAction(_exportPhoto),
+          ),
+          if (DateTime.now().toUtc().isBefore(_card.editDeadline))
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit card'),
+              onTap: () => _selectAction(_edit),
+            ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Move to Deleted'),
+            onTap: () => _selectAction(_delete),
+          ),
+        ],
+      ),
+    ),
+  );
+
   @override
   void dispose() {
     final subscription = _subscription;
@@ -159,78 +200,79 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Memory'),
-      actions: [
-        IconButton(
-          tooltip: 'Export card archive',
-          onPressed: _exportCard,
-          icon: const Icon(Icons.archive_outlined),
-        ),
-        IconButton(
-          tooltip: 'Export photo to gallery',
-          onPressed: _exportingPhoto ? null : _exportPhoto,
-          icon: const Icon(Icons.save_alt_outlined),
-        ),
-        if (DateTime.now().toUtc().isBefore(_card.editDeadline))
-          IconButton(
-            tooltip: 'Edit card',
-            onPressed: _edit,
-            icon: const Icon(Icons.edit_outlined),
-          ),
-        IconButton(
-          tooltip: 'Move to Deleted',
-          onPressed: _delete,
-          icon: const Icon(Icons.delete_outline),
-        ),
-      ],
-    ),
-    body: ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Card(
-          color: Colors.white,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AspectRatio(
-                  aspectRatio: 1,
-                  child: InteractiveViewer(
-                    child: Image.file(
-                      widget.repository.photoFile(_card),
-                      fit: BoxFit.contain,
+  Widget build(BuildContext context) => Dialog(
+    backgroundColor: Colors.white,
+    insetPadding: const EdgeInsets.all(20),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    clipBehavior: Clip.antiAlias,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: SingleChildScrollView(
+        child: Stack(
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onLongPress: () => setState(() => _showActions = true),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AspectRatio(
+                      aspectRatio: 1,
+                      child: InteractiveViewer(
+                        child: Image.file(
+                          widget.repository.photoFile(_card),
+                          fit: BoxFit.contain,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _card.displayDate,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                if (_card.text != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_card.text!),
-                ],
-                if (_card.audioPath != null) ...[
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: _toggleAudio,
-                    icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
-                    label: Text(
-                      _playing ? 'Pause voice note' : 'Play voice note',
+                    const SizedBox(height: 12),
+                    Text(
+                      _card.displayDate,
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
-                  ),
-                ],
-                if (_card.latitude != null && _card.longitude != null)
-                  const Icon(Icons.location_on_outlined),
-              ],
+                    if (_card.text != null) ...[
+                      const SizedBox(height: 12),
+                      Text(_card.text!),
+                    ],
+                    if (_card.audioPath != null) ...[
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: _toggleAudio,
+                        icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+                        label: Text(
+                          _playing ? 'Pause voice note' : 'Play voice note',
+                        ),
+                      ),
+                    ],
+                    if (_card.latitude != null && _card.longitude != null)
+                      const Icon(Icons.location_on_outlined),
+                  ],
+                ),
+              ),
             ),
-          ),
+            if (_showActions) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _showActions = false),
+                  child: const ColoredBox(color: Colors.transparent),
+                ),
+              ),
+              Positioned(
+                top: 8,
+                left: 8,
+                right: 8,
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: _actionMenu(),
+                ),
+              ),
+            ],
+          ],
         ),
-      ],
+      ),
     ),
   );
 }
