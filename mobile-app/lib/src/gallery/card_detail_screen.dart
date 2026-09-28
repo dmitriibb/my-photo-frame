@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:gal/gal.dart';
 import 'package:path/path.dart' as p;
-import 'package:just_audio/just_audio.dart';
 
 import '../data/card_repository.dart';
 import '../data/models.dart';
 import '../export/archive_export.dart';
 import '../export/export_actions.dart';
+import '../media/voice_playback_controls.dart';
 import 'edit_screen.dart';
 
 class CardDetailScreen extends StatefulWidget {
@@ -33,7 +33,7 @@ class CardDetailScreen extends StatefulWidget {
 
 class _CardDetailScreenState extends State<CardDetailScreen>
     with SingleTickerProviderStateMixin {
-  final AudioPlayer _player = AudioPlayer();
+  final GlobalKey<VoicePlaybackControlsState> _playbackKey = GlobalKey();
   late final AnimationController _swipeAnimation;
   final Set<int> _pressedPointers = {};
   VelocityTracker? _velocityTracker;
@@ -48,8 +48,6 @@ class _CardDetailScreenState extends State<CardDetailScreen>
   final GlobalKey _frontContentKey = GlobalKey();
   late final List<MemoryCard> _cards;
   late int _currentIndex;
-  StreamSubscription<PlayerState>? _subscription;
-  bool _playing = false;
   bool _exportingPhoto = false;
   bool _showActions = false;
   late MemoryCard _card;
@@ -75,38 +73,10 @@ class _CardDetailScreenState extends State<CardDetailScreen>
                 _animationStart + (_animationEnd - _animationStart) * progress;
           });
         });
-    _subscription = _player.playerStateStream.listen((state) {
-      if (mounted) {
-        setState(
-          () => _playing =
-              state.playing &&
-              state.processingState != ProcessingState.completed,
-        );
-      }
-    });
-  }
-
-  Future<void> _toggleAudio() async {
-    final file = widget.repository.audioFile(_card);
-    if (file == null) return;
-    try {
-      if (_playing) {
-        await _player.pause();
-      } else {
-        await _player.setFilePath(file.path);
-        unawaited(_player.play());
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not play voice note: $error')),
-        );
-      }
-    }
   }
 
   Future<void> _edit() async {
-    await _player.stop();
+    await _playbackKey.currentState?.stop();
     if (!mounted) return;
     final updated = await Navigator.of(context).push<MemoryCard>(
       MaterialPageRoute(
@@ -197,7 +167,7 @@ class _CardDetailScreenState extends State<CardDetailScreen>
   Future<void> _swipe(double direction) async {
     if (_transitioning) return;
     _transitioning = true;
-    await _player.stop();
+    await _playbackKey.currentState?.stop();
     if (!mounted) return;
     final exitOffset = direction * MediaQuery.sizeOf(context).width * 1.2;
     await _animateOffset(exitOffset);
@@ -236,7 +206,7 @@ class _CardDetailScreenState extends State<CardDetailScreen>
     );
     if (confirmed != true || !mounted) return;
     try {
-      await _player.stop();
+      await _playbackKey.currentState?.stop();
       await widget.repository.softDeleteCard(_card.id);
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
@@ -325,9 +295,6 @@ class _CardDetailScreenState extends State<CardDetailScreen>
   @override
   void dispose() {
     _swipeAnimation.dispose();
-    final subscription = _subscription;
-    if (subscription != null) unawaited(subscription.cancel());
-    unawaited(_player.dispose());
     super.dispose();
   }
 
@@ -378,15 +345,14 @@ class _CardDetailScreenState extends State<CardDetailScreen>
               ],
               if (card.audioPath != null) ...[
                 const SizedBox(height: 8),
-                TextButton.icon(
-                  onPressed: active ? _toggleAudio : () {},
-                  icon: Icon(
-                    active && _playing ? Icons.pause : Icons.play_arrow,
-                  ),
-                  label: Text(
-                    active && _playing ? 'Pause voice note' : 'Play voice note',
-                  ),
-                ),
+                if (active)
+                  VoicePlaybackControls(
+                    key: _playbackKey,
+                    file: widget.repository.audioFile(card)!,
+                    onRemove: null,
+                  )
+                else
+                  const Icon(Icons.play_arrow),
               ],
               if (card.latitude != null && card.longitude != null)
                 const Icon(Icons.location_on_outlined),

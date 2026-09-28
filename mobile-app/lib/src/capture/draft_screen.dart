@@ -14,18 +14,24 @@ class DraftScreen extends StatefulWidget {
     super.key,
     required this.repository,
     required this.draftsDirectory,
-    required this.photo,
+    this.photo,
+    this.photoFuture,
+    this.pendingPhotoPreview,
+    this.onPhotoReady,
     required this.capturedAt,
     required this.initialCollectionId,
     this.dateSource = PhotoDateSource.capture,
     this.displayDate,
     this.latitude,
     this.longitude,
-  });
+  }) : assert((photo == null) != (photoFuture == null));
 
   final CardRepository repository;
   final Directory draftsDirectory;
-  final File photo;
+  final File? photo;
+  final Future<File>? photoFuture;
+  final Widget? pendingPhotoPreview;
+  final VoidCallback? onPhotoReady;
   final DateTime capturedAt;
   final String initialCollectionId;
   final PhotoDateSource dateSource;
@@ -42,6 +48,8 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
   final GlobalKey<VoicePlaybackControlsState> _playbackKey = GlobalKey();
   late final VoiceDraft _voice;
   bool _saving = false;
+  File? _photo;
+  Object? _photoError;
   bool _locating = false;
   double? _latitude;
   double? _longitude;
@@ -53,11 +61,36 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _collectionId = widget.initialCollectionId;
+    _photo = widget.photo;
+    if (widget.photoFuture != null) unawaited(_resolvePhoto());
     _latitude = widget.latitude;
     _longitude = widget.longitude;
     _collections = widget.repository.listCollections();
     _voice = VoiceDraft(PluginVoiceRecorder(), widget.draftsDirectory)
       ..addListener(_refresh);
+  }
+
+  Future<void> _resolvePhoto() async {
+    File? resolved;
+    try {
+      resolved = await widget.photoFuture!;
+      if (!mounted) {
+        await resolved.delete();
+        return;
+      }
+      await precacheImage(FileImage(resolved), context);
+      if (!mounted) {
+        await resolved.delete();
+        return;
+      }
+      setState(() => _photo = resolved);
+      // Keep the camera texture alive until the route and image fade finish.
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      if (mounted) widget.onPhotoReady?.call();
+    } catch (error) {
+      if (resolved != null && await resolved.exists()) await resolved.delete();
+      if (mounted) setState(() => _photoError = error);
+    }
   }
 
   void _refresh() {
@@ -139,13 +172,13 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _save() async {
-    if (_saving || _voice.isStarting) return;
+    if (_saving || _voice.isStarting || _photo == null) return;
     setState(() => _saving = true);
     try {
       if (_voice.isRecording) await _voice.release();
       await widget.repository.saveCard(
         collectionId: _collectionId,
-        processedPhoto: widget.photo,
+        processedPhoto: _photo!,
         photoDate: widget.capturedAt,
         photoDateSource: widget.dateSource,
         displayDate: widget.displayDate,
@@ -175,7 +208,10 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
     _voice.removeListener(_refresh);
     _voice.dispose();
     _text.dispose();
-    unawaited(widget.photo.delete().catchError((Object _) => widget.photo));
+    final photo = _photo;
+    if (photo != null) {
+      unawaited(photo.delete().catchError((Object _) => photo));
+    }
     super.dispose();
   }
 
@@ -203,8 +239,23 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
             child: SizedBox(
               height: 48,
               child: FilledButton(
-                onPressed: _saving || _voice.isStarting ? null : _save,
-                child: Text(_saving ? 'Saving…' : 'Done'),
+                onPressed: _saving || _voice.isStarting || _photo == null
+                    ? null
+                    : _save,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_photo == null && _photoError == null) ...[
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Text(_saving ? 'Saving…' : 'Done'),
+                  ],
+                ),
               ),
             ),
           ),
@@ -223,7 +274,60 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
                     children: [
                       AspectRatio(
                         aspectRatio: 1,
-                        child: Image.file(widget.photo, fit: BoxFit.cover),
+                        child: widget.pendingPhotoPreview == null
+                            ? Image.file(_photo!, fit: BoxFit.cover)
+                            : Hero(
+                                tag: 'captured-photo',
+                                child: ClipRect(
+                                  child: AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 250),
+                                    child: _photo != null
+                                        ? Image.file(
+                                            _photo!,
+                                            key: ValueKey(_photo!.path),
+                                            fit: BoxFit.cover,
+                                            width: double.infinity,
+                                            height: double.infinity,
+                                          )
+                                        : Stack(
+                                            key: const ValueKey(
+                                              'camera-preview',
+                                            ),
+                                            fit: StackFit.expand,
+                                            children: [
+                                              widget.pendingPhotoPreview!,
+                                              if (_photoError != null)
+                                                ColoredBox(
+                                                  color: Colors.black54,
+                                                  child: Center(
+                                                    child: Column(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        const Text(
+                                                          'Could not take photo',
+                                                          style: TextStyle(
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                        TextButton(
+                                                          onPressed: () =>
+                                                              Navigator.of(
+                                                                context,
+                                                              ).pop(false),
+                                                          child: const Text(
+                                                            'Retake',
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                  ),
+                                ),
+                              ),
                       ),
                       const SizedBox(height: 12),
                       Text(

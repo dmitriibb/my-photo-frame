@@ -96,52 +96,66 @@ class _CameraScreenState extends State<CameraScreen>
       return;
     }
     setState(() => _capturing = true);
+    final capturedAt = DateTime.now();
+    final photoFuture = _takeAndProcess(controller);
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => DraftScreen(
+          repository: widget.repository,
+          draftsDirectory: widget.draftsDirectory,
+          initialCollectionId: widget.initialCollectionId,
+          photoFuture: photoFuture,
+          pendingPhotoPreview: _squarePreview(controller),
+          onPhotoReady: () => _releaseController(controller),
+          capturedAt: capturedAt,
+        ),
+      ),
+    );
+    // A canceled draft can return while the camera is still writing the shot.
+    // Wait before allowing another capture on the same controller.
+    if (saved != true) {
+      try {
+        await photoFuture;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _capturing = false);
+    if (saved == true) {
+      Navigator.of(context).pop(true);
+    } else if (_controller == null) {
+      await _initialize();
+    }
+  }
+
+  Future<File> _takeAndProcess(CameraController controller) async {
     File? raw;
     try {
-      final capturedAt = DateTime.now();
       raw = File((await controller.takePicture()).path);
       final processed = await processCardPhoto(raw, widget.draftsDirectory);
       await raw.delete();
       raw = null;
-      if (!mounted) {
-        await processed.delete();
-        return;
-      }
-      setState(() => _controller = null);
-      await controller.dispose();
-      if (!mounted) {
-        await processed.delete();
-        return;
-      }
-      final saved = await Navigator.of(context).push<bool>(
-        MaterialPageRoute<bool>(
-          builder: (_) => DraftScreen(
-            repository: widget.repository,
-            draftsDirectory: widget.draftsDirectory,
-            initialCollectionId: widget.initialCollectionId,
-            photo: processed,
-            capturedAt: capturedAt,
-          ),
-        ),
-      );
-      if (mounted) {
-        if (saved == true) {
-          Navigator.of(context).pop(true);
-        } else {
-          await _initialize();
-        }
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not save photo: $error')));
-      }
+      return processed;
     } finally {
       if (raw != null && await raw.exists()) await raw.delete();
-      if (mounted) setState(() => _capturing = false);
     }
   }
+
+  void _releaseController(CameraController controller) {
+    if (_controller != controller) return;
+    if (mounted) setState(() => _controller = null);
+    unawaited(controller.dispose());
+  }
+
+  Widget _squarePreview(CameraController controller) => ClipRect(
+    child: FittedBox(
+      fit: BoxFit.cover,
+      child: SizedBox(
+        width: controller.value.previewSize!.height,
+        height: controller.value.previewSize!.width,
+        child: CameraPreview(controller),
+      ),
+    ),
+  );
 
   @override
   void dispose() {
@@ -172,15 +186,9 @@ class _CameraScreenState extends State<CameraScreen>
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    ClipRect(
-                      child: FittedBox(
-                        fit: BoxFit.cover,
-                        child: SizedBox(
-                          width: controller.value.previewSize!.height,
-                          height: controller.value.previewSize!.width,
-                          child: CameraPreview(controller),
-                        ),
-                      ),
+                    Hero(
+                      tag: 'captured-photo',
+                      child: _squarePreview(controller),
                     ),
                     IgnorePointer(
                       child: DecoratedBox(
@@ -211,16 +219,18 @@ class _CameraScreenState extends State<CameraScreen>
             const Spacer(),
             Padding(
               padding: const EdgeInsets.only(bottom: 48),
-              child: FilledButton.tonalIcon(
+              child: FilledButton(
                 onPressed: _capturing || controller == null ? null : _capture,
-                icon: _capturing
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.camera_alt),
-                label: const Text('Capture square photo'),
+                style: FilledButton.styleFrom(
+                  shape: const CircleBorder(),
+                  fixedSize: const Size(156, 156),
+                  padding: EdgeInsets.zero,
+                ),
+                child: const Icon(
+                  Icons.camera_alt,
+                  size: 60,
+                  semanticLabel: 'Take a photo',
+                ),
               ),
             ),
           ],
