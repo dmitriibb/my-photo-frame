@@ -149,6 +149,37 @@ void main() {
     },
   );
 
+  test('location can be added and removed during the edit window', () async {
+    final samplePhoto = File(p.join(documents.path, 'sample.jpg'));
+    await samplePhoto.writeAsBytes(
+      image.encodeJpg(image.Image(width: 2, height: 2)),
+    );
+    final saved = await repository.saveCard(
+      collectionId: Collection.defaultId,
+      processedPhoto: samplePhoto,
+      photoDate: DateTime.utc(2025),
+      photoDateSource: PhotoDateSource.capture,
+    );
+    final added = await repository.editCard(
+      id: saved.id,
+      text: null,
+      latitude: 52.52,
+      longitude: 13.405,
+      at: saved.createdAt.add(const Duration(minutes: 1)),
+    );
+    expect(added.latitude, 52.52);
+    expect(added.longitude, 13.405);
+
+    final removed = await repository.editCard(
+      id: saved.id,
+      text: null,
+      removeLocation: true,
+      at: saved.createdAt.add(const Duration(minutes: 2)),
+    );
+    expect(removed.latitude, isNull);
+    expect(removed.longitude, isNull);
+  });
+
   test(
     'deleted card restores within 30 days and purges at the boundary',
     () async {

@@ -2,11 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../data/card_repository.dart';
 import '../data/models.dart';
 import '../media/voice_draft.dart';
+import '../media/voice_playback_controls.dart';
 
 class EditScreen extends StatefulWidget {
   const EditScreen({
@@ -27,12 +28,13 @@ class EditScreen extends StatefulWidget {
 class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
   late final TextEditingController _text;
   late final VoiceDraft _voice;
-  final AudioPlayer _player = AudioPlayer();
-  StreamSubscription<PlayerState>? _playerSubscription;
+  final GlobalKey<VoicePlaybackControlsState> _playbackKey = GlobalKey();
   Timer? _deadlineTimer;
-  bool _playing = false;
   bool _removeExistingAudio = false;
   bool _removeLocation = false;
+  bool _locating = false;
+  double? _latitude;
+  double? _longitude;
   bool _saving = false;
 
   bool get _editable =>
@@ -49,17 +51,10 @@ class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _text = TextEditingController(text: widget.card.text ?? '');
+    _latitude = widget.card.latitude;
+    _longitude = widget.card.longitude;
     _voice = VoiceDraft(PluginVoiceRecorder(), widget.draftsDirectory)
       ..addListener(_refresh);
-    _playerSubscription = _player.playerStateStream.listen((state) {
-      if (mounted) {
-        setState(
-          () => _playing =
-              state.playing &&
-              state.processingState != ProcessingState.completed,
-        );
-      }
-    });
     final remaining = widget.card.editDeadline.difference(
       DateTime.now().toUtc(),
     );
@@ -77,13 +72,13 @@ class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       unawaited(_voice.cancel());
-      unawaited(_player.pause());
     }
   }
 
   Future<void> _startVoice() async {
     try {
-      unawaited(_player.stop().catchError((Object _) {}));
+      final playback = _playbackKey.currentState;
+      if (playback != null) unawaited(playback.stop());
       await _voice.press();
     } on MicrophonePermissionDenied {
       _message('Microphone access is needed to record a voice note.');
@@ -92,25 +87,45 @@ class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _playVoice() async {
-    final file = _audioForPlayback;
-    if (file == null) return;
-    try {
-      if (_playing) {
-        await _player.pause();
-      } else {
-        await _player.setFilePath(file.path);
-        unawaited(_player.play());
-      }
-    } catch (error) {
-      _message('Could not play voice note: $error');
-    }
-  }
-
   Future<void> _removeAudio() async {
-    await _player.stop();
+    await _playbackKey.currentState?.stop();
     await _voice.removeClip();
     setState(() => _removeExistingAudio = true);
+  }
+
+  Future<void> _addLocation() async {
+    if (_locating || !_editable) return;
+    setState(() => _locating = true);
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        throw StateError('Location services are off.');
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw StateError('Location permission was denied.');
+      }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+      if (mounted && _editable) {
+        setState(() {
+          _latitude = position.latitude;
+          _longitude = position.longitude;
+          _removeLocation = false;
+        });
+      }
+    } catch (error) {
+      _message('Could not add location: $error');
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
   }
 
   Future<void> _save() async {
@@ -124,6 +139,8 @@ class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
         newAudio: _voice.clip,
         removeAudio: _removeExistingAudio && _voice.clip == null,
         removeLocation: _removeLocation,
+        latitude: _removeLocation ? null : _latitude,
+        longitude: _removeLocation ? null : _longitude,
       );
       if (mounted) Navigator.of(context).pop(updated);
     } catch (error) {
@@ -148,9 +165,6 @@ class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
     _voice.removeListener(_refresh);
     _voice.dispose();
     _text.dispose();
-    final subscription = _playerSubscription;
-    if (subscription != null) unawaited(subscription.cancel());
-    unawaited(_player.dispose());
     super.dispose();
   }
 
@@ -162,123 +176,135 @@ class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
       canPop: !_saving,
       child: Scaffold(
         appBar: AppBar(title: const Text('Edit memory')),
-        body: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Text(
-              _editable
-                  ? 'Editable until ${deadline.year}-${deadline.month.toString().padLeft(2, '0')}-${deadline.day.toString().padLeft(2, '0')} ${deadline.hour.toString().padLeft(2, '0')}:${deadline.minute.toString().padLeft(2, '0')}'
-                  : 'The 24-hour edit window has ended.',
-            ),
-            const SizedBox(height: 16),
-            AspectRatio(
-              aspectRatio: 1,
-              child: Image.file(
-                widget.repository.photoFile(widget.card),
-                fit: BoxFit.cover,
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: SizedBox(
+              height: 48,
+              child: FilledButton(
+                onPressed: _editable && !_saving && !_voice.isStarting
+                    ? _save
+                    : null,
+                child: Text(_saving ? 'Saving…' : 'Save changes'),
               ),
             ),
-            const SizedBox(height: 16),
-            Text(widget.card.displayDate),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _text,
-              enabled: _editable && !_saving,
-              minLines: 2,
-              maxLines: 4,
-              decoration: InputDecoration(
-                labelText: 'Short description (optional)',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  tooltip: 'Remove text',
-                  onPressed: _editable ? _text.clear : null,
-                  icon: const Icon(Icons.clear),
+          ),
+        ),
+        body: SafeArea(
+          top: false,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              Text(
+                _editable
+                    ? 'Editable until ${deadline.year}-${deadline.month.toString().padLeft(2, '0')}-${deadline.day.toString().padLeft(2, '0')} ${deadline.hour.toString().padLeft(2, '0')}:${deadline.minute.toString().padLeft(2, '0')}'
+                    : 'The 24-hour edit window has ended.',
+              ),
+              const SizedBox(height: 16),
+              AspectRatio(
+                aspectRatio: 1,
+                child: Image.file(
+                  widget.repository.photoFile(widget.card),
+                  fit: BoxFit.cover,
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Listener(
-                  onPointerDown: _editable && !_saving
-                      ? (_) => unawaited(_startVoice())
-                      : null,
-                  onPointerUp: _editable
-                      ? (_) => unawaited(
-                          _voice.release().catchError((Object error) {
-                            _message('Could not finish recording: $error');
+              const SizedBox(height: 16),
+              Text(
+                widget.card.displayDate,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _text,
+                enabled: _editable && !_saving,
+                minLines: 1,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  hintText: 'text',
+                  border: InputBorder.none,
+                  suffixIcon: IconButton(
+                    tooltip: 'Remove text',
+                    onPressed: _editable ? _text.clear : null,
+                    icon: const Icon(Icons.clear),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: _latitude == null
+                        ? 'Add current location'
+                        : 'Remove location',
+                    onPressed: !_editable || _saving || _locating
+                        ? null
+                        : _latitude == null
+                        ? _addLocation
+                        : () => setState(() {
+                            _latitude = null;
+                            _longitude = null;
+                            _removeLocation = true;
                           }),
-                        )
-                      : null,
-                  onPointerCancel: _editable
-                      ? (_) => unawaited(_voice.cancel())
-                      : null,
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: _voice.isRecording
-                          ? Theme.of(context).colorScheme.errorContainer
-                          : Theme.of(context).colorScheme.primaryContainer,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.mic_none),
+                    icon: _locating
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            _latitude == null
+                                ? Icons.location_off_outlined
+                                : Icons.location_on,
+                          ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _voice.isRecording
-                        ? 'Recording ${_voice.elapsedSeconds}s / 60s'
-                        : audio == null
-                        ? 'Hold microphone to record (max 60s)'
-                        : 'Hold microphone to replace voice note (max 60s)',
-                  ),
-                ),
-              ],
-            ),
-            if (audio != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: _playing ? 'Pause voice note' : 'Play voice note',
-                    onPressed: _playVoice,
-                    icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
-                  ),
-                  const Expanded(child: Text('Voice note')),
-                  IconButton(
-                    tooltip: 'Remove audio',
-                    onPressed: _editable ? _removeAudio : null,
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ],
-              ),
-            ],
-            if (widget.card.latitude != null &&
-                widget.card.longitude != null &&
-                !_removeLocation) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(Icons.location_on_outlined),
-                  const Expanded(child: Text('Location attached')),
-                  TextButton(
-                    onPressed: _editable
-                        ? () => setState(() => _removeLocation = true)
+                  const SizedBox(width: 8),
+                  Listener(
+                    onPointerDown: _editable && !_saving
+                        ? (_) => unawaited(_startVoice())
                         : null,
-                    child: const Text('Remove location'),
+                    onPointerUp: _editable
+                        ? (_) => unawaited(
+                            _voice.release().catchError((Object error) {
+                              _message('Could not finish recording: $error');
+                            }),
+                          )
+                        : null,
+                    onPointerCancel: _editable
+                        ? (_) => unawaited(_voice.cancel())
+                        : null,
+                    child: Tooltip(
+                      message: 'Hold to record voice note',
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _voice.isRecording
+                              ? Theme.of(context).colorScheme.errorContainer
+                              : Theme.of(context).colorScheme.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.mic),
+                      ),
+                    ),
                   ),
+                  if (_voice.isRecording || _voice.isStarting) ...[
+                    const SizedBox(width: 12),
+                    Text(
+                      _voice.isRecording
+                          ? 'Recording ${_voice.elapsedSeconds}s / 60s'
+                          : 'Starting microphone…',
+                    ),
+                  ],
                 ],
               ),
+              if (audio != null)
+                VoicePlaybackControls(
+                  key: _playbackKey,
+                  file: audio,
+                  onRemove: _editable ? () => unawaited(_removeAudio()) : null,
+                ),
             ],
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _editable && !_saving && !_voice.isStarting
-                  ? _save
-                  : null,
-              child: Text(_saving ? 'Saving…' : 'Save changes'),
-            ),
-          ],
+          ),
         ),
       ),
     );

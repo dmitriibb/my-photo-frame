@@ -161,67 +161,70 @@ class _CameraScreenState extends State<CameraScreen>
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
       ),
-      body: Column(
-        children: [
-          const Spacer(),
-          if (controller != null && controller.value.isInitialized)
-            AspectRatio(
-              aspectRatio: 1,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  ClipRect(
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        width: controller.value.previewSize!.height,
-                        height: controller.value.previewSize!.width,
-                        child: CameraPreview(controller),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            const Spacer(),
+            if (controller != null && controller.value.isInitialized)
+              AspectRatio(
+                aspectRatio: 1,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ClipRect(
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: controller.value.previewSize!.height,
+                          height: controller.value.previewSize!.width,
+                          child: CameraPreview(controller),
+                        ),
                       ),
                     ),
-                  ),
-                  IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.white70, width: 2),
+                    IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.white70, width: 2),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            )
-          else if (_error != null)
+                  ],
+                ),
+              )
+            else if (_error != null)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Text(_error!, style: const TextStyle(color: Colors.white)),
+                    const SizedBox(height: 16),
+                    OutlinedButton(
+                      onPressed: _initialize,
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              )
+            else
+              const Center(child: CircularProgressIndicator()),
+            const Spacer(),
             Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  Text(_error!, style: const TextStyle(color: Colors.white)),
-                  const SizedBox(height: 16),
-                  OutlinedButton(
-                    onPressed: _initialize,
-                    child: const Text('Retry'),
-                  ),
-                ],
+              padding: const EdgeInsets.only(bottom: 48),
+              child: FilledButton.tonalIcon(
+                onPressed: _capturing || controller == null ? null : _capture,
+                icon: _capturing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.camera_alt),
+                label: const Text('Capture square photo'),
               ),
-            )
-          else
-            const Center(child: CircularProgressIndicator()),
-          const Spacer(),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 48),
-            child: FilledButton.tonalIcon(
-              onPressed: _capturing || controller == null ? null : _capture,
-              icon: _capturing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.camera_alt),
-              label: const Text('Capture square photo'),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

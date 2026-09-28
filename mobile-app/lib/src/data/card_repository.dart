@@ -87,10 +87,16 @@ class CardRepository {
     File? newAudio,
     bool removeAudio = false,
     bool removeLocation = false,
+    double? latitude,
+    double? longitude,
     DateTime? at,
   }) async {
     if (newAudio != null && removeAudio) {
       throw ArgumentError('Cannot replace and remove audio together.');
+    }
+    if ((latitude == null) != (longitude == null) ||
+        (removeLocation && latitude != null)) {
+      throw ArgumentError('Location requires both coordinates or removal.');
     }
     final now = (at ?? DateTime.now()).toUtc();
     final current = await getCard(id);
@@ -125,8 +131,8 @@ class CardRepository {
             'text': text?.trim().isEmpty == true ? null : text?.trim(),
             'audio_path':
                 newAudioPath ?? (removeAudio ? null : latest.audioPath),
-            'latitude': removeLocation ? null : latest.latitude,
-            'longitude': removeLocation ? null : latest.longitude,
+            'latitude': removeLocation ? null : latitude ?? latest.latitude,
+            'longitude': removeLocation ? null : longitude ?? latest.longitude,
             'updated_at': now.toIso8601String(),
           },
           where: 'id = ?',

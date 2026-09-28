@@ -404,28 +404,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       onPressed: _openCamera,
       child: const Icon(Icons.camera_alt_outlined),
     ),
-    body: FutureBuilder<List<MemoryCard>>(
-      future: _cards,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(child: Text('Could not load cards: ${snapshot.error}'));
-        }
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final cards = snapshot.data!;
-        if (cards.isEmpty) {
-          return const Center(child: Text('Your memories will appear here.'));
-        }
-        return CollectionGrid(
-          cards: cards,
-          columns: _galleryColumns,
-          onColumnsChanged: (columns) =>
-              setState(() => _galleryColumns = columns),
-          photoFile: widget.repository.photoFile,
-          onCardTap: (card) => _openDetail(card, cards),
-        );
-      },
+    body: SafeArea(
+      top: false,
+      child: FutureBuilder<List<MemoryCard>>(
+        future: _cards,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Text('Could not load cards: ${snapshot.error}'),
+            );
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final cards = snapshot.data!;
+          if (cards.isEmpty) {
+            return const Center(child: Text('Your memories will appear here.'));
+          }
+          return CollectionGrid(
+            cards: cards,
+            columns: _galleryColumns,
+            onColumnsChanged: (columns) =>
+                setState(() => _galleryColumns = columns),
+            photoFile: widget.repository.photoFile,
+            onCardTap: (card) => _openDetail(card, cards),
+          );
+        },
+      ),
     ),
   );
 }

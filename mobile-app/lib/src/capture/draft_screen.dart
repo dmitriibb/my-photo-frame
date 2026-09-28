@@ -3,11 +3,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:just_audio/just_audio.dart';
 
 import '../data/card_repository.dart';
 import '../data/models.dart';
 import '../media/voice_draft.dart';
+import '../media/voice_playback_controls.dart';
 
 class DraftScreen extends StatefulWidget {
   const DraftScreen({
@@ -39,12 +39,9 @@ class DraftScreen extends StatefulWidget {
 
 class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
   final TextEditingController _text = TextEditingController();
-  final AudioPlayer _player = AudioPlayer();
+  final GlobalKey<VoicePlaybackControlsState> _playbackKey = GlobalKey();
   late final VoiceDraft _voice;
-  StreamSubscription<PlayerState>? _playerSubscription;
   bool _saving = false;
-  bool _playing = false;
-  bool _includeLocation = true;
   bool _locating = false;
   double? _latitude;
   double? _longitude;
@@ -61,15 +58,6 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
     _collections = widget.repository.listCollections();
     _voice = VoiceDraft(PluginVoiceRecorder(), widget.draftsDirectory)
       ..addListener(_refresh);
-    _playerSubscription = _player.playerStateStream.listen((state) {
-      if (mounted) {
-        setState(
-          () => _playing =
-              state.playing &&
-              state.processingState != ProcessingState.completed,
-        );
-      }
-    });
   }
 
   void _refresh() {
@@ -81,13 +69,12 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       unawaited(_voice.cancel());
-      unawaited(_player.pause());
     }
   }
 
   Future<void> _startVoice() async {
     try {
-      unawaited(_player.stop().catchError((Object _) {}));
+      unawaited(_playbackKey.currentState?.stop());
       await _voice.press();
     } on MicrophonePermissionDenied {
       _message('Microphone access is needed to record a voice note.');
@@ -112,23 +99,8 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _playVoice() async {
-    final clip = _voice.clip;
-    if (clip == null) return;
-    try {
-      if (_playing) {
-        await _player.pause();
-      } else {
-        await _player.setFilePath(clip.path);
-        unawaited(_player.play());
-      }
-    } catch (error) {
-      _message('Could not play recording: $error');
-    }
-  }
-
   Future<void> _removeVoice() async {
-    await _player.stop();
+    await _playbackKey.currentState?.stop();
     await _voice.removeClip();
   }
 
@@ -157,7 +129,6 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
         setState(() {
           _latitude = position.latitude;
           _longitude = position.longitude;
-          _includeLocation = true;
         });
       }
     } catch (error) {
@@ -180,8 +151,8 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
         displayDate: widget.displayDate,
         text: _text.text,
         recordedAudio: _voice.clip,
-        latitude: _includeLocation ? _latitude : null,
-        longitude: _includeLocation ? _longitude : null,
+        latitude: _latitude,
+        longitude: _longitude,
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
@@ -204,8 +175,6 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
     _voice.removeListener(_refresh);
     _voice.dispose();
     _text.dispose();
-    unawaited(_playerSubscription?.cancel());
-    unawaited(_player.dispose());
     unawaited(widget.photo.delete().catchError((Object _) => widget.photo));
     super.dispose();
   }
@@ -227,145 +196,149 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
             ),
           ],
         ),
-        body: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Card(
-              color: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 1,
-                      child: Image.file(widget.photo, fit: BoxFit.cover),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      widget.displayDate ??
-                          '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    if (_latitude != null && _longitude != null)
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Include photo location'),
-                        value: _includeLocation,
-                        onChanged: (value) =>
-                            setState(() => _includeLocation = value),
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: SizedBox(
+              height: 48,
+              child: FilledButton(
+                onPressed: _saving || _voice.isStarting ? null : _save,
+                child: Text(_saving ? 'Saving…' : 'Done'),
+              ),
+            ),
+          ),
+        ),
+        body: SafeArea(
+          top: false,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              Card(
+                color: Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 1,
+                        child: Image.file(widget.photo, fit: BoxFit.cover),
                       ),
-                    if (_latitude == null &&
-                        widget.dateSource == PhotoDateSource.capture)
-                      TextButton.icon(
-                        onPressed: _locating ? null : _addLocation,
-                        icon: const Icon(Icons.add_location_alt_outlined),
-                        label: Text(
-                          _locating
-                              ? 'Getting location…'
-                              : 'Add current location',
+                      const SizedBox(height: 12),
+                      Text(
+                        widget.displayDate ??
+                            '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _text,
+                        maxLines: 4,
+                        minLines: 1,
+                        decoration: const InputDecoration(
+                          hintText: 'text',
+                          border: InputBorder.none,
                         ),
                       ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _text,
-                      maxLines: 4,
-                      minLines: 2,
-                      decoration: const InputDecoration(
-                        labelText: 'Short description (optional)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Listener(
-                          onPointerDown: (_) => unawaited(_startVoice()),
-                          onPointerUp: (_) => unawaited(_finishVoice()),
-                          onPointerCancel: (_) => unawaited(_cancelVoice()),
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: _voice.isRecording
-                                  ? Theme.of(context).colorScheme.errorContainer
-                                  : Theme.of(
-                                      context,
-                                    ).colorScheme.primaryContainer,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              _voice.isRecording ? Icons.mic : Icons.mic_none,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            _voice.isRecording
-                                ? 'Recording ${_voice.elapsedSeconds}s / 60s'
-                                : _voice.isStarting
-                                ? 'Starting microphone…'
-                                : 'Hold microphone to record (max 60s)',
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_voice.clip != null) ...[
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           IconButton(
-                            tooltip: _playing
-                                ? 'Pause voice note'
-                                : 'Play voice note',
-                            onPressed: _playVoice,
-                            icon: Icon(
-                              _playing ? Icons.pause : Icons.play_arrow,
+                            tooltip: _latitude == null
+                                ? 'Add current location'
+                                : 'Remove location',
+                            onPressed: _locating
+                                ? null
+                                : _latitude == null
+                                ? _addLocation
+                                : () => setState(() {
+                                    _latitude = null;
+                                    _longitude = null;
+                                  }),
+                            icon: _locating
+                                ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Icon(
+                                    _latitude == null
+                                        ? Icons.location_off_outlined
+                                        : Icons.location_on,
+                                  ),
+                          ),
+                          const SizedBox(width: 8),
+                          Listener(
+                            onPointerDown: (_) => unawaited(_startVoice()),
+                            onPointerUp: (_) => unawaited(_finishVoice()),
+                            onPointerCancel: (_) => unawaited(_cancelVoice()),
+                            child: Tooltip(
+                              message: 'Hold to record voice note',
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: _voice.isRecording
+                                      ? Theme.of(
+                                          context,
+                                        ).colorScheme.errorContainer
+                                      : Theme.of(
+                                          context,
+                                        ).colorScheme.primaryContainer,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.mic),
+                              ),
                             ),
                           ),
-                          const Expanded(child: Text('Voice note ready')),
-                          IconButton(
-                            tooltip: 'Remove voice note',
-                            onPressed: _removeVoice,
-                            icon: const Icon(Icons.delete_outline),
-                          ),
+                          if (_voice.isRecording || _voice.isStarting) ...[
+                            const SizedBox(width: 12),
+                            Text(
+                              _voice.isRecording
+                                  ? 'Recording ${_voice.elapsedSeconds}s / 60s'
+                                  : 'Starting microphone…',
+                            ),
+                          ],
                         ],
                       ),
+                      if (_voice.clip != null)
+                        VoicePlaybackControls(
+                          key: _playbackKey,
+                          file: _voice.clip!,
+                          onRemove: () => unawaited(_removeVoice()),
+                        ),
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            FutureBuilder<List<Collection>>(
-              future: _collections,
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const LinearProgressIndicator();
-                return DropdownButtonFormField<String>(
-                  initialValue: _collectionId,
-                  decoration: const InputDecoration(
-                    labelText: 'Collection',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    for (final collection in snapshot.data!)
-                      DropdownMenuItem(
-                        value: collection.id,
-                        child: Text(collection.name),
-                      ),
-                  ],
-                  onChanged: (id) {
-                    if (id != null) setState(() => _collectionId = id);
-                  },
-                );
-              },
-            ),
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _saving || _voice.isStarting ? null : _save,
-              child: Text(_saving ? 'Saving…' : 'Done'),
-            ),
-          ],
+              const SizedBox(height: 16),
+              FutureBuilder<List<Collection>>(
+                future: _collections,
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const LinearProgressIndicator();
+                  return DropdownButtonFormField<String>(
+                    initialValue: _collectionId,
+                    decoration: const InputDecoration(
+                      labelText: 'Collection',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      for (final collection in snapshot.data!)
+                        DropdownMenuItem(
+                          value: collection.id,
+                          child: Text(collection.name),
+                        ),
+                    ],
+                    onChanged: (id) {
+                      if (id != null) setState(() => _collectionId = id);
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
