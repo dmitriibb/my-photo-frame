@@ -56,13 +56,14 @@ void main() {
       await show(3);
       expect(find.text('2026-09-27'), findsOneWidget);
       expect(find.text('A remembered day'), findsOneWidget);
-      expect(find.byIcon(Icons.mic_rounded), findsOneWidget);
-      expect(find.byIcon(Icons.location_on_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.volume_up_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.mic_rounded), findsNothing);
+      expect(find.byIcon(Icons.location_on_outlined), findsNothing);
 
       await show(4);
       expect(find.text('2026-09-27'), findsOneWidget);
       expect(find.text('A remembered day'), findsNothing);
-      expect(find.byIcon(Icons.mic_rounded), findsNothing);
+      expect(find.byIcon(Icons.volume_up_rounded), findsNothing);
       expect(find.byIcon(Icons.location_on_outlined), findsNothing);
 
       await show(6);

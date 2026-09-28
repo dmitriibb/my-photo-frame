@@ -189,10 +189,8 @@ class _CollectionGridState extends State<CollectionGrid> {
                         style: TextStyle(fontSize: config.dateFontSize),
                       ),
                       if (card.audioPath != null)
-                        Icon(Icons.mic_rounded, size: config.indicatorSize),
-                      if (card.latitude != null && card.longitude != null)
                         Icon(
-                          Icons.location_on_outlined,
+                          Icons.volume_up_rounded,
                           size: config.indicatorSize,
                         ),
                     ],
