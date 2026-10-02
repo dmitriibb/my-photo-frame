@@ -13,6 +13,9 @@ class CollectionGrid extends StatefulWidget {
     required this.onColumnsChanged,
     required this.photoFile,
     required this.onCardTap,
+    this.onCardLongPress,
+    this.selectionMode = false,
+    this.selectedCardIds = const {},
   });
 
   final List<MemoryCard> cards;
@@ -20,6 +23,9 @@ class CollectionGrid extends StatefulWidget {
   final ValueChanged<int> onColumnsChanged;
   final File Function(MemoryCard) photoFile;
   final ValueChanged<MemoryCard> onCardTap;
+  final ValueChanged<MemoryCard>? onCardLongPress;
+  final bool selectionMode;
+  final Set<String> selectedCardIds;
 
   @override
   State<CollectionGrid> createState() => _CollectionGridState();
@@ -139,6 +145,63 @@ class _CollectionGridState extends State<CollectionGrid> {
   );
 
   Widget _tile(MemoryCard card, GalleryTileConfig config) {
+    final selected = widget.selectedCardIds.contains(card.id);
+    return Stack(
+      children: [
+        _tileContent(card, config),
+        if (widget.selectionMode) ...[
+          if (selected)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 3,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            top: 2,
+            right: 2,
+            child: Semantics(
+              label: 'Select card ${card.displayDate}',
+              button: true,
+              selected: selected,
+              child: InkResponse(
+                key: ValueKey('gallery-select-${card.id}'),
+                onTap: () => widget.onCardTap(card),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: Colors.black38, blurRadius: 3),
+                      ],
+                    ),
+                    child: Icon(
+                      selected
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      size: config.mode == GalleryTileMode.small ? 16 : 24,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _tileContent(MemoryCard card, GalleryTileConfig config) {
     final photo = AspectRatio(
       aspectRatio: 1,
       child: LayoutBuilder(
@@ -159,6 +222,9 @@ class _CollectionGridState extends State<CollectionGrid> {
       return InkWell(
         key: ValueKey('gallery-card-${card.id}'),
         onTap: () => widget.onCardTap(card),
+        onLongPress: widget.onCardLongPress == null
+            ? null
+            : () => widget.onCardLongPress!(card),
         child: photo,
       );
     }
@@ -170,6 +236,9 @@ class _CollectionGridState extends State<CollectionGrid> {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => widget.onCardTap(card),
+        onLongPress: widget.onCardLongPress == null
+            ? null
+            : () => widget.onCardLongPress!(card),
         child: Padding(
           padding: EdgeInsets.all(config.cardPadding),
           child: Column(

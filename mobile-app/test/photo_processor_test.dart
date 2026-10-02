@@ -68,6 +68,39 @@ void main() {
     final bytes = await output.readAsBytes();
     final decoded = image.decodeJpg(bytes)!;
     expect(bytes.length, lessThanOrEqualTo(maxCardPhotoBytes));
-    expect(decoded.width, decoded.height);
+    expect(decoded.width, 1200);
+    expect(decoded.height, 1200);
   });
+
+  test(
+    'portrait photo loses only top and bottom and keeps square resolution',
+    () async {
+      final source = image.Image(width: 1700, height: 1900);
+      for (var y = 0; y < source.height; y++) {
+        for (var x = 0; x < source.width; x++) {
+          source.setPixelRgb(
+            x,
+            y,
+            y < 100 ? 255 : 0,
+            y >= 100 && y < 1800 ? 255 : 0,
+            y >= 1800 ? 255 : 0,
+          );
+        }
+      }
+      final input = File(p.join(temp.path, 'portrait.png'));
+      await input.writeAsBytes(image.encodePng(source));
+
+      final output = await processCardPhoto(
+        input,
+        Directory(p.join(temp.path, 'drafts')),
+      );
+      final bytes = await output.readAsBytes();
+      final decoded = image.decodeJpg(bytes)!;
+      expect(decoded.width, 1700);
+      expect(decoded.height, 1700);
+      expect(bytes.length, lessThanOrEqualTo(maxCardPhotoBytes));
+      expect(decoded.getPixel(850, 0).g, greaterThan(200));
+      expect(decoded.getPixel(850, 1699).g, greaterThan(200));
+    },
+  );
 }

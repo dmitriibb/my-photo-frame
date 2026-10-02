@@ -210,29 +210,14 @@ class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
                 ),
               ),
               const SizedBox(height: 16),
-              Text(
-                widget.card.displayDate,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _text,
-                enabled: _editable && !_saving,
-                minLines: 1,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  hintText: 'text',
-                  border: InputBorder.none,
-                  suffixIcon: IconButton(
-                    tooltip: 'Remove text',
-                    onPressed: _editable ? _text.clear : null,
-                    icon: const Icon(Icons.clear),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
               Row(
                 children: [
+                  Expanded(
+                    child: Text(
+                      widget.card.displayDate,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
                   IconButton(
                     tooltip: _latitude == null
                         ? 'Add current location'
@@ -258,45 +243,68 @@ class _EditScreenState extends State<EditScreen> with WidgetsBindingObserver {
                                 : Icons.location_on,
                           ),
                   ),
-                  const SizedBox(width: 8),
-                  Listener(
-                    onPointerDown: _editable && !_saving
-                        ? (_) => unawaited(_startVoice())
-                        : null,
-                    onPointerUp: _editable
-                        ? (_) => unawaited(
-                            _voice.release().catchError((Object error) {
-                              _message('Could not finish recording: $error');
-                            }),
-                          )
-                        : null,
-                    onPointerCancel: _editable
-                        ? (_) => unawaited(_voice.cancel())
-                        : null,
-                    child: Tooltip(
-                      message: 'Hold to record voice note',
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: _voice.isRecording
-                              ? Theme.of(context).colorScheme.errorContainer
-                              : Theme.of(context).colorScheme.primaryContainer,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.mic),
-                      ),
-                    ),
-                  ),
-                  if (_voice.isRecording || _voice.isStarting) ...[
-                    const SizedBox(width: 12),
-                    Text(
-                      _voice.isRecording
-                          ? 'Recording ${_voice.elapsedSeconds}s / 60s'
-                          : 'Starting microphone…',
-                    ),
-                  ],
                 ],
               ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _text,
+                enabled: _editable && !_saving,
+                minLines: 1,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  hintText: 'text',
+                  border: InputBorder.none,
+                  suffixIcon: IconButton(
+                    tooltip: 'Remove text',
+                    onPressed: _editable ? _text.clear : null,
+                    icon: const Icon(Icons.clear),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (audio == null)
+                Row(
+                  children: [
+                    Listener(
+                      onPointerDown: _editable && !_saving
+                          ? (_) => unawaited(_startVoice())
+                          : null,
+                      onPointerUp: _editable
+                          ? (_) => unawaited(
+                              _voice.release().catchError((Object error) {
+                                _message('Could not finish recording: $error');
+                              }),
+                            )
+                          : null,
+                      onPointerCancel: _editable
+                          ? (_) => unawaited(_voice.cancel())
+                          : null,
+                      child: Tooltip(
+                        message: 'Hold to record voice note',
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _voice.isRecording
+                                ? Theme.of(context).colorScheme.errorContainer
+                                : Theme.of(
+                                    context,
+                                  ).colorScheme.primaryContainer,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.mic),
+                        ),
+                      ),
+                    ),
+                    if (_voice.isRecording || _voice.isStarting) ...[
+                      const SizedBox(width: 12),
+                      Text(
+                        _voice.isRecording
+                            ? 'Recording ${_voice.elapsedSeconds}s / 60s'
+                            : 'Starting microphone…',
+                      ),
+                    ],
+                  ],
+                ),
               if (audio != null)
                 VoicePlaybackControls(
                   key: _playbackKey,

@@ -310,6 +310,24 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
                                                             color: Colors.white,
                                                           ),
                                                         ),
+                                                        if (_photoError
+                                                            is FormatException)
+                                                          const Padding(
+                                                            padding:
+                                                                EdgeInsets.all(
+                                                                  12,
+                                                                ),
+                                                            child: Text(
+                                                              'This photo cannot fit in 1 MB without reducing its resolution. Please retake it.',
+                                                              textAlign:
+                                                                  TextAlign
+                                                                      .center,
+                                                              style: TextStyle(
+                                                                color: Colors
+                                                                    .white,
+                                                              ),
+                                                            ),
+                                                          ),
                                                         TextButton(
                                                           onPressed: () =>
                                                               Navigator.of(
@@ -330,24 +348,15 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
                               ),
                       ),
                       const SizedBox(height: 12),
-                      Text(
-                        widget.displayDate ??
-                            '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _text,
-                        maxLines: 4,
-                        minLines: 1,
-                        decoration: const InputDecoration(
-                          hintText: 'text',
-                          border: InputBorder.none,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
                       Row(
                         children: [
+                          Expanded(
+                            child: Text(
+                              widget.displayDate ??
+                                  '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
                           IconButton(
                             tooltip: _latitude == null
                                 ? 'Add current location'
@@ -374,39 +383,54 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
                                         : Icons.location_on,
                                   ),
                           ),
-                          const SizedBox(width: 8),
-                          Listener(
-                            onPointerDown: (_) => unawaited(_startVoice()),
-                            onPointerUp: (_) => unawaited(_finishVoice()),
-                            onPointerCancel: (_) => unawaited(_cancelVoice()),
-                            child: Tooltip(
-                              message: 'Hold to record voice note',
-                              child: Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: _voice.isRecording
-                                      ? Theme.of(
-                                          context,
-                                        ).colorScheme.errorContainer
-                                      : Theme.of(
-                                          context,
-                                        ).colorScheme.primaryContainer,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.mic),
-                              ),
-                            ),
-                          ),
-                          if (_voice.isRecording || _voice.isStarting) ...[
-                            const SizedBox(width: 12),
-                            Text(
-                              _voice.isRecording
-                                  ? 'Recording ${_voice.elapsedSeconds}s / 60s'
-                                  : 'Starting microphone…',
-                            ),
-                          ],
                         ],
                       ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _text,
+                        maxLines: 4,
+                        minLines: 1,
+                        decoration: const InputDecoration(
+                          hintText: 'text',
+                          border: InputBorder.none,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (_voice.clip == null)
+                        Row(
+                          children: [
+                            Listener(
+                              onPointerDown: (_) => unawaited(_startVoice()),
+                              onPointerUp: (_) => unawaited(_finishVoice()),
+                              onPointerCancel: (_) => unawaited(_cancelVoice()),
+                              child: Tooltip(
+                                message: 'Hold to record voice note',
+                                child: Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: _voice.isRecording
+                                        ? Theme.of(
+                                            context,
+                                          ).colorScheme.errorContainer
+                                        : Theme.of(
+                                            context,
+                                          ).colorScheme.primaryContainer,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.mic),
+                                ),
+                              ),
+                            ),
+                            if (_voice.isRecording || _voice.isStarting) ...[
+                              const SizedBox(width: 12),
+                              Text(
+                                _voice.isRecording
+                                    ? 'Recording ${_voice.elapsedSeconds}s / 60s'
+                                    : 'Starting microphone…',
+                              ),
+                            ],
+                          ],
+                        ),
                       if (_voice.clip != null)
                         VoicePlaybackControls(
                           key: _playbackKey,

@@ -111,6 +111,49 @@ void main() {
     await second.up();
   });
 
+  testWidgets('selection circles work in full, medium, and compact grids', (
+    tester,
+  ) async {
+    final directory = Directory.systemTemp.createTempSync('gallery_selection_');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final photo = File('${directory.path}/sample.jpg')
+      ..writeAsBytesSync(image.encodeJpg(image.Image(width: 2, height: 2)));
+    var toggled = false;
+    var longPressed = false;
+    for (final columns in [3, 6, 10]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CollectionGrid(
+              cards: [_card(photo.path)],
+              columns: columns,
+              onColumnsChanged: (_) {},
+              photoFile: (_) => photo,
+              onCardTap: (_) => toggled = true,
+              onCardLongPress: (_) => longPressed = true,
+              selectionMode: true,
+              selectedCardIds: const {'one'},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      toggled = false;
+      longPressed = false;
+      await tester.tap(find.byKey(const ValueKey('gallery-select-one')));
+      expect(toggled, isTrue);
+      // Press outside the circle to exercise the card gesture at every density.
+      final tile = tester.getRect(
+        find.byKey(const ValueKey('gallery-card-one')),
+      );
+      await tester.longPressAt(
+        Offset(tile.left + tile.width / 4, tile.top + tile.height / 2),
+      );
+      expect(longPressed, isTrue);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('pinching in increases columns up to the maximum', (
     tester,
   ) async {

@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../data/card_repository.dart';
 import '../data/models.dart';
+import 'export_paths.dart';
 
 const archiveFormatVersion = 1;
 
@@ -44,10 +45,20 @@ class ArchiveExport {
     }
   }
 
-  Future<ExportBundle> collection(Collection collection) async {
+  Future<ExportBundle> collection(
+    Collection collection, {
+    Set<String>? cardIds,
+  }) async {
     final directory = await _scratch();
     try {
-      final cards = await repository.listActiveCards(collection.id);
+      final active = await repository.listActiveCards(collection.id);
+      final cards = cardIds == null
+          ? active
+          : active.where((card) => cardIds.contains(card.id)).toList();
+      if (cardIds != null &&
+          (cardIds.isEmpty || cards.length != cardIds.length)) {
+        throw StateError('Some selected cards are no longer available.');
+      }
       final entries = <Map<String, Object?>>[];
       final cardFiles = <File>[];
       for (final card in cards) {
@@ -79,7 +90,10 @@ class ArchiveExport {
         },
       );
       final output = File(
-        p.join(directory.path, 'collection-${collection.id}.zip'),
+        p.join(
+          directory.path,
+          '${exportCollectionName(collection.name)}${cardIds == null ? '' : '-selected-cards'}.zip',
+        ),
       );
       final encoder = ZipFileEncoder()..create(output.path);
       try {
@@ -102,10 +116,14 @@ class ArchiveExport {
   }
 
   Future<void> _writeCard(
-    MemoryCard card,
+    MemoryCard original,
     File output,
     Directory scratch,
   ) async {
+    final card = await repository.getCard(original.id);
+    if (card == null || card.deletedAt != null) {
+      throw StateError('This card is no longer available for export.');
+    }
     final photo = repository.photoFile(card);
     final audio = repository.audioFile(card);
     final manifest = await _writeManifest(scratch, 'card_manifest.json', {

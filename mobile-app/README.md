@@ -8,6 +8,17 @@ Camera photos are normalized for orientation, center-cropped to 1:1, encoded as 
 
 Run `flutter test` for persistence, photo processing, recording-limit, and cleanup checks. Run `flutter run -d <android-device>` on an emulator or physical device to launch the app. Early capture/save/playback verification was performed on an Android emulator; physical-device checks on Dima's Xiaomi 14 are deferred until the app is ready enough to install.
 
+## Export selected cards
+
+Long-press a card in a collection to select it and enter multiselect mode. Tap a card or its top-right circle to toggle selection. Android Back or the toolbar Back button clears selection and exits the mode.
+
+The top-right action menu offers:
+
+- **Export to gallery:** copies only the selected photos to `Pictures/my-photo-frame/<collection name>` using Android MediaStore. Text, audio, and location data are not added to the gallery. Folder names replace characters that cannot be used safely in paths.
+- **Export as cards:** opens Android's save picker for `<collection name>-selected-cards.zip`. The archive uses the existing version 1 collection format: a collection `manifest.json` and one self-contained ZIP per selected card under `cards/`. Each card ZIP contains its manifest, JPEG, optional audio, and SHA-256 checksums; text, dates, and optional location are preserved in its manifest. Canceling the picker keeps the selection. Temporary ZIP files are removed after saving or canceling.
+
+Deleted cards cannot be exported. Photos remain private until an explicit export. The drawer's Export action still exports the whole current collection.
+
 ## Build a release APK
 
 From `mobile-app/`, run:

@@ -8,7 +8,7 @@ import 'package:uuid/uuid.dart';
 
 const maxCardPhotoBytes = 1000000;
 
-/// Converts a camera image into a square JPEG without source EXIF metadata.
+/// Crops to a full-resolution square JPEG without source EXIF metadata.
 Future<File> processCardPhoto(File source, Directory draftsDirectory) async {
   await draftsDirectory.create(recursive: true);
   final bytes = await Isolate.run(() => _encodeCardPhoto(source.path));
@@ -36,30 +36,23 @@ Uint8List _encodeCardPhoto(String sourcePath) {
   square.exif = image.ExifData();
   square.iccProfile = null;
 
-  var targetSide = side > 1600 ? 1600 : side;
-  while (targetSide > 0) {
-    final resized = targetSide == side
-        ? square
-        : image.copyResize(
-            square,
-            width: targetSide,
-            height: targetSide,
-            interpolation: image.Interpolation.average,
-          );
-    resized.exif = image.ExifData();
-    resized.iccProfile = null;
-    for (final quality in [90, 80, 70, 60, 50, 40]) {
-      final bytes = image.encodeJpg(resized, quality: quality);
-      if (bytes.length <= maxCardPhotoBytes) {
-        final verified = image.decodeJpg(bytes);
-        if (verified == null || verified.width != verified.height) {
-          throw const FormatException('Processed photo is not square.');
-        }
-        return bytes;
-      }
+  Uint8List? best;
+  var low = 1;
+  var high = 95;
+  while (low <= high) {
+    final quality = (low + high) ~/ 2;
+    final bytes = image.encodeJpg(square, quality: quality);
+    if (bytes.length <= maxCardPhotoBytes) {
+      best = bytes;
+      low = quality + 1;
+    } else {
+      high = quality - 1;
     }
-    if (targetSide <= 128) break;
-    targetSide = (targetSide * 0.8).floor().clamp(128, targetSide - 1);
   }
-  throw const FormatException('Photo could not be compressed below 1 MB.');
+  if (best == null) {
+    throw const FormatException(
+      'Photo could not be compressed below 1 MB without reducing its resolution.',
+    );
+  }
+  return best;
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:path/path.dart' as p;
 
@@ -33,6 +34,7 @@ class CardDetailScreen extends StatefulWidget {
 
 class _CardDetailScreenState extends State<CardDetailScreen>
     with SingleTickerProviderStateMixin {
+  static const _mapsChannel = MethodChannel('my_photo_frame/maps');
   final GlobalKey<VoicePlaybackControlsState> _playbackKey = GlobalKey();
   late final AnimationController _swipeAnimation;
   final Set<int> _pressedPointers = {};
@@ -252,6 +254,28 @@ class _CardDetailScreenState extends State<CardDetailScreen>
     );
   }
 
+  Future<void> _openLocation(MemoryCard card) async {
+    try {
+      await _mapsChannel.invokeMethod<void>('openLocation', {
+        'latitude': card.latitude,
+        'longitude': card.longitude,
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      final message = error.code == 'no_map_app'
+          ? 'No map app is available to open this location.'
+          : 'Could not open location.';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } on MissingPluginException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not open location.')));
+    }
+  }
+
   void _selectAction(Future<void> Function() action) {
     setState(() => _showActions = false);
     unawaited(action());
@@ -335,9 +359,23 @@ class _CardDetailScreenState extends State<CardDetailScreen>
                       ),
               ),
               const SizedBox(height: 12),
-              Text(
-                card.displayDate,
-                style: Theme.of(context).textTheme.titleMedium,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      card.displayDate,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  if (card.latitude != null && card.longitude != null)
+                    active
+                        ? IconButton(
+                            tooltip: 'Open location in a map app',
+                            onPressed: () => _openLocation(card),
+                            icon: const Icon(Icons.location_on_outlined),
+                          )
+                        : const Icon(Icons.location_on_outlined),
+                ],
               ),
               if (card.text != null) ...[
                 const SizedBox(height: 12),
@@ -354,8 +392,6 @@ class _CardDetailScreenState extends State<CardDetailScreen>
                 else
                   const Icon(Icons.play_arrow),
               ],
-              if (card.latitude != null && card.longitude != null)
-                const Icon(Icons.location_on_outlined),
             ],
           ),
         ),

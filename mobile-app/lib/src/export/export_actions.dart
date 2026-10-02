@@ -6,6 +6,24 @@ import 'archive_export.dart';
 
 enum _ExportAction { save, share }
 
+/// Opens Android's save picker directly and always removes temporary archives.
+Future<bool> saveArchiveToFiles(
+  Future<ExportBundle> Function() createArchive,
+) async {
+  final bundle = await createArchive();
+  try {
+    final saved = await FilePicker.saveFile(
+      fileName: bundle.file.uri.pathSegments.last,
+      bytes: await bundle.file.readAsBytes(),
+      mimeType: 'application/zip',
+      dialogTitle: 'Save My Photo Frame archive',
+    );
+    return saved != null;
+  } finally {
+    await bundle.dispose();
+  }
+}
+
 Future<void> showArchiveExportOptions(
   BuildContext context,
   Future<ExportBundle> Function() createArchive,
@@ -29,20 +47,15 @@ Future<void> showArchiveExportOptions(
   if (action == null || !context.mounted) return;
   ExportBundle? bundle;
   try {
-    bundle = await createArchive();
     if (action == _ExportAction.save) {
-      final saved = await FilePicker.saveFile(
-        fileName: bundle.file.uri.pathSegments.last,
-        bytes: await bundle.file.readAsBytes(),
-        mimeType: 'application/zip',
-        dialogTitle: 'Save My Photo Frame archive',
-      );
-      if (saved != null && context.mounted) {
+      final saved = await saveArchiveToFiles(createArchive);
+      if (saved && context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Archive saved.')));
       }
     } else {
+      bundle = await createArchive();
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(bundle.file.path, mimeType: 'application/zip')],

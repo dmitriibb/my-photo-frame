@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
 import 'package:my_photo_frame/main.dart';
@@ -13,6 +14,74 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   sqfliteFfiInit();
+
+  testWidgets('location icon opens the saved coordinates in a map app', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    const channel = MethodChannel('my_photo_frame/maps');
+    MethodCall? mapCall;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          mapCall = call;
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    late Directory directory;
+    late AppDatabase database;
+    late CardRepository repository;
+    late MemoryCard card;
+    await tester.runAsync(() async {
+      directory = await Directory.systemTemp.createTemp('card_location_');
+      database = await AppDatabase.open(
+        p.join(directory.path, 'cards.db'),
+        factory: databaseFactoryFfiNoIsolate,
+      );
+      repository = CardRepository(database, directory);
+      await repository.initialize();
+      final photo = File(p.join(directory.path, 'sample.jpg'));
+      await photo.writeAsBytes(
+        image.encodeJpg(image.Image(width: 2, height: 2)),
+      );
+      card = await repository.saveCard(
+        collectionId: Collection.defaultId,
+        processedPhoto: photo,
+        photoDate: DateTime.utc(2026, 9, 27),
+        photoDateSource: PhotoDateSource.capture,
+        latitude: 52.52,
+        longitude: 13.405,
+      );
+    });
+    await tester.pumpWidget(
+      MyPhotoFrame(
+        repository: repository,
+        draftsDirectory: Directory(p.join(directory.path, 'drafts')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('gallery-card-${card.id}')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Open location in a map app'));
+    await tester.pump();
+    expect(mapCall?.method, 'openLocation');
+    expect(mapCall?.arguments, {'latitude': 52.52, 'longitude': 13.405});
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(() async {
+      await database.close();
+      await directory.delete(recursive: true);
+    });
+  });
 
   testWidgets(
     'card opens over gallery and long press actions dismiss correctly',

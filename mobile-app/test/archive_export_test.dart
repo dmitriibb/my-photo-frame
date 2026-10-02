@@ -51,12 +51,19 @@ void main() {
             photoDateSource: PhotoDateSource.capture,
           );
           await repository.softDeleteCard(deleted.id);
+          final unselected = await repository.saveCard(
+            collectionId: Collection.defaultId,
+            processedPhoto: photo,
+            photoDate: DateTime.utc(2024, 1, 4),
+            photoDateSource: PhotoDateSource.capture,
+          );
           final exporter = ArchiveExport(
             repository,
             Directory(p.join(root.path, 'exports')),
           );
           final bundle = await exporter.collection(
             (await repository.listCollections()).single,
+            cardIds: {card.id},
           );
           try {
             final outer = ZipDecoder().decodeBytes(
@@ -72,6 +79,7 @@ void main() {
             expect(entries, hasLength(1));
             final entry = entries.single as Map<String, dynamic>;
             expect(entry['id'], card.id);
+            expect(outer.findFile('cards/${unselected.id}.zip'), isNull);
             final cardBytes = outer.findFile(entry['file'] as String)!.content;
             expect(sha256.convert(cardBytes).toString(), entry['sha256']);
             final inner = ZipDecoder().decodeBytes(cardBytes);
@@ -99,6 +107,29 @@ void main() {
           } finally {
             await bundle.dispose();
           }
+          final collection = (await repository.listCollections()).single;
+          final full = await exporter.collection(collection);
+          try {
+            final zip = ZipDecoder().decodeBytes(await full.file.readAsBytes());
+            final manifest =
+                jsonDecode(utf8.decode(zip.findFile('manifest.json')!.content))
+                    as Map<String, dynamic>;
+            expect(manifest['cards'], hasLength(2));
+          } finally {
+            await full.dispose();
+          }
+          for (final ids in [
+            <String>{},
+            {deleted.id},
+            {'missing'},
+          ]) {
+            await expectLater(
+              exporter.collection(collection, cardIds: ids),
+              throwsStateError,
+            );
+          }
+          await expectLater(exporter.card(deleted), throwsStateError);
+          expect(await exporter.cacheDirectory.list().toList(), isEmpty);
         } finally {
           await db.close();
         }
