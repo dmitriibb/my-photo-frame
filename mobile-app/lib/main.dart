@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
-import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
@@ -29,6 +28,12 @@ import 'src/export/export_paths.dart';
 const _purgeTask = 'purge-expired-cards';
 
 enum _SelectionExportAction { gallery, cards }
+
+enum _HomeAction { importFromGallery, collection }
+
+enum _CollectionAction { delete, zip, gallery, rename }
+
+enum _ImportMode { automatic, manual }
 
 @pragma('vm:entry-point')
 void backgroundTaskDispatcher() {
@@ -291,7 +296,223 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         builder: (_) => DeletedScreen(repository: widget.repository),
       ),
     );
-    if (mounted) _refreshCards();
+    if (mounted) {
+      await _loadCollections();
+      _refreshCards();
+    }
+  }
+
+  Future<void> _openCollectionActions() async {
+    final collections = await widget.repository.listCollections();
+    if (!mounted) return;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Collection'),
+        children: [
+          for (final collection in collections)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, collection.id),
+              child: Text(collection.name),
+            ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialogContext, '_add_new'),
+            child: const Row(
+              children: [Icon(Icons.add), SizedBox(width: 12), Text('Add new')],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == '_add_new') {
+      await _createCollection();
+      return;
+    }
+    final collection = collections
+        .where((item) => item.id == choice)
+        .firstOrNull;
+    if (collection == null) return;
+    final action = await showDialog<_CollectionAction>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text(collection.name),
+        children: [
+          SimpleDialogOption(
+            onPressed: collection.id == Collection.defaultId
+                ? null
+                : () => Navigator.pop(dialogContext, _CollectionAction.delete),
+            child: Text(
+              'Delete',
+              style: TextStyle(
+                color: collection.id == Collection.defaultId
+                    ? Theme.of(context).disabledColor
+                    : null,
+              ),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () =>
+                Navigator.pop(dialogContext, _CollectionAction.zip),
+            child: const Text('Export to ZIP'),
+          ),
+          SimpleDialogOption(
+            onPressed: () =>
+                Navigator.pop(dialogContext, _CollectionAction.gallery),
+            child: const Text('Export to gallery'),
+          ),
+          SimpleDialogOption(
+            onPressed: () =>
+                Navigator.pop(dialogContext, _CollectionAction.rename),
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _CollectionAction.delete:
+        await _deleteCollection(collection);
+      case _CollectionAction.zip:
+        await _exportCollection(collection);
+      case _CollectionAction.gallery:
+        await _exportCollectionToGallery(collection);
+      case _CollectionAction.rename:
+        await _renameCollection(collection);
+    }
+  }
+
+  Future<void> _deleteCollection(Collection collection) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete ${collection.name}?'),
+        content: const Text(
+          'The collection and its cards will move to Deleted. You can restore them for 30 days.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.repository.softDeleteCollection(collection.id);
+      if (!mounted) return;
+      if (_selectedCollectionId == collection.id) {
+        _selectedCollectionId = Collection.defaultId;
+      }
+      await _loadCollections();
+      if (!mounted) return;
+      _refreshCards();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Collection moved to Deleted.')),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not delete collection: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _renameCollection(Collection collection) async {
+    var name = collection.name;
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rename collection'),
+        content: TextFormField(
+          initialValue: collection.name,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Name'),
+          onChanged: (value) => name = value,
+          onFieldSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, name),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (entered == null || !mounted) return;
+    try {
+      await widget.repository.renameCollection(collection.id, entered);
+      if (mounted) await _loadCollections();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not rename collection: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportCollectionToGallery(Collection collection) async {
+    var exported = 0;
+    try {
+      final activeCollection = await widget.repository.getCollection(
+        collection.id,
+      );
+      if (activeCollection == null || activeCollection.deletedAt != null) {
+        throw StateError('This collection is no longer available.');
+      }
+      final cards = await widget.repository.listActiveCards(collection.id);
+      if (!await Gal.hasAccess(toAlbum: true) &&
+          !await Gal.requestAccess(toAlbum: true)) {
+        throw StateError('Gallery access was denied.');
+      }
+      for (final card in cards) {
+        final currentCollection = await widget.repository.getCollection(
+          collection.id,
+        );
+        if (currentCollection == null || currentCollection.deletedAt != null) {
+          throw StateError('This collection is no longer available.');
+        }
+        final current = await widget.repository.getCard(card.id);
+        if (current == null || current.deletedAt != null) {
+          throw StateError('A card is no longer available.');
+        }
+        await Gal.putImage(
+          widget.repository.photoFile(current).path,
+          album: galleryAlbum(collection.name),
+        );
+        exported++;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '$exported ${exported == 1 ? 'photo' : 'photos'} exported to gallery.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Exported $exported photos. Could not finish: $error',
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _openDetail(MemoryCard card, List<MemoryCard> cards) async {
@@ -321,66 +542,182 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (saved == true && mounted) _refreshCards();
   }
 
+  Future<String?> _chooseImportCollection() async {
+    final collections = await widget.repository.listCollections();
+    if (!mounted) return null;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Import to collection'),
+        children: [
+          for (final collection in collections)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, collection.id),
+              child: Text(collection.name),
+            ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialogContext, '_new'),
+            child: const Row(
+              children: [
+                Icon(Icons.add),
+                SizedBox(width: 12),
+                Text('New collection'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (choice != '_new' || !mounted) return choice;
+    var name = '';
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('New collection'),
+        content: TextField(
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Name'),
+          onChanged: (value) => name = value,
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, name),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (entered == null || !mounted) return null;
+    final collection = await widget.repository.createCollection(entered);
+    await _loadCollections();
+    return collection.id;
+  }
+
+  Future<_ImportMode?> _chooseImportMode() => showDialog<_ImportMode>(
+    context: context,
+    builder: (dialogContext) => SimpleDialog(
+      title: const Text('Import'),
+      children: [
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(dialogContext, _ImportMode.automatic),
+          child: const Text('Auto'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(dialogContext, _ImportMode.manual),
+          child: const Text('Manual'),
+        ),
+      ],
+    ),
+  );
+
   Future<void> _importPhoto() async {
     if (_importing) return;
     setState(() => _importing = true);
-    File? processed;
+    var savedCount = 0;
+    var failedCount = 0;
+    String? destinationId;
     try {
-      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-      if (picked == null) return;
-      final metadata = await readImportMetadata(File(picked.path));
-      final cropped = await ImageCropper().cropImage(
-        sourcePath: picked.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: 'Crop memory',
-            lockAspectRatio: true,
-            aspectRatioPresets: [CropAspectRatioPreset.square],
+      final picked = await ImagePicker().pickMultiImage();
+      if (picked.isEmpty || !mounted) return;
+      final collectionId = await _chooseImportCollection();
+      if (collectionId == null || !mounted) return;
+      destinationId = collectionId;
+      final mode = await _chooseImportMode();
+      if (mode == null || !mounted) return;
+      for (var index = 0; index < picked.length; index++) {
+        if (!mounted) break;
+        final original = File(picked[index].path);
+        File? processed;
+        try {
+          final metadata = await readImportMetadata(original);
+          processed = await processCardPhoto(original, widget.draftsDirectory);
+          if (mode == _ImportMode.automatic) {
+            await widget.repository.saveCard(
+              collectionId: collectionId,
+              processedPhoto: processed,
+              photoDate: metadata.photoDate,
+              photoDateSource: metadata.dateSource,
+              displayDate: metadata.displayDate,
+              displayTime: metadata.displayTime,
+              latitude: metadata.latitude,
+              longitude: metadata.longitude,
+            );
+            savedCount++;
+          } else {
+            if (!mounted) break;
+            final saved = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(
+                builder: (_) => DraftScreen(
+                  repository: widget.repository,
+                  draftsDirectory: widget.draftsDirectory,
+                  photo: processed,
+                  originalImportPhoto: original,
+                  importProgress: '${index + 1}/${picked.length}',
+                  capturedAt: metadata.photoDate,
+                  dateSource: metadata.dateSource,
+                  displayDate: metadata.displayDate,
+                  displayTime: metadata.displayTime,
+                  latitude: metadata.latitude,
+                  longitude: metadata.longitude,
+                  initialCollectionId: collectionId,
+                ),
+              ),
+            );
+            processed = null; // DraftScreen owns the processed photo.
+            if (saved != true) break;
+            savedCount++;
+          }
+        } catch (_) {
+          failedCount++;
+        } finally {
+          if (processed != null && await processed.exists()) {
+            await processed.delete();
+          }
+        }
+      }
+      if (mounted && (savedCount > 0 || failedCount > 0)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              failedCount == 0
+                  ? '$savedCount ${savedCount == 1 ? 'photo' : 'photos'} imported.'
+                  : '$savedCount imported, $failedCount could not be imported.',
+            ),
           ),
-        ],
-      );
-      if (cropped == null) return;
-      processed = await processCardPhoto(
-        File(cropped.path),
-        widget.draftsDirectory,
-      );
-      if (!mounted) return;
-      final saved = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (_) => DraftScreen(
-            repository: widget.repository,
-            draftsDirectory: widget.draftsDirectory,
-            photo: processed!,
-            capturedAt: metadata.photoDate,
-            dateSource: metadata.dateSource,
-            displayDate: metadata.displayDate,
-            latitude: metadata.latitude,
-            longitude: metadata.longitude,
-            initialCollectionId: _selectedCollectionId,
-          ),
-        ),
-      );
-      processed = null; // DraftScreen owns and removes its temporary photo.
-      if (saved == true && mounted) _refreshCards();
+        );
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not import photo: $error')),
+          SnackBar(
+            content: Text(
+              'Imported $savedCount photos. Could not finish: $error',
+            ),
+          ),
         );
       }
     } finally {
-      if (processed != null && await processed.exists()) {
-        await processed.delete();
+      if (mounted) {
+        if (savedCount > 0 && destinationId != null) {
+          _selectedCollectionId = destinationId;
+        }
+        _refreshCards();
+        setState(() => _importing = false);
       }
-      if (mounted) setState(() => _importing = false);
     }
   }
 
-  Future<void> _exportCollection() async {
-    final collection = _collections
-        .where((item) => item.id == _selectedCollectionId)
-        .firstOrNull;
+  Future<void> _exportCollection([Collection? chosen]) async {
+    final collection =
+        chosen ??
+        _collections
+            .where((item) => item.id == _selectedCollectionId)
+            .firstOrNull;
     if (collection == null) return;
     final exports = Directory(
       p.join(widget.draftsDirectory.parent.path, 'my_photo_frame_exports'),
@@ -521,6 +858,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
+          else if (_importing)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: SizedBox.square(
+                dimension: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
           else if (_selectionMode)
             PopupMenuButton<_SelectionExportAction>(
               tooltip: 'Selection actions',
@@ -537,11 +882,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: const Text('Export as cards'),
                 ),
               ],
+            )
+          else
+            PopupMenuButton<_HomeAction>(
+              tooltip: 'Actions',
+              enabled: !_importing,
+              onSelected: (action) {
+                if (action == _HomeAction.importFromGallery) _importPhoto();
+                if (action == _HomeAction.collection) _openCollectionActions();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: _HomeAction.importFromGallery,
+                  child: Text('Import from gallery'),
+                ),
+                PopupMenuItem(
+                  value: _HomeAction.collection,
+                  child: Text('Collection'),
+                ),
+              ],
             ),
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: _selectionMode || _exportingSelection
+      floatingActionButton: _selectionMode || _exportingSelection || _importing
           ? null
           : FloatingActionButton(
               tooltip: 'Take a photo',
