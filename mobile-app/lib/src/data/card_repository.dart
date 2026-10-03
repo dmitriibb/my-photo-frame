@@ -33,9 +33,73 @@ class CardRepository {
   Future<List<Collection>> listCollections() async {
     final rows = await database.db.query(
       'collections',
+      where: 'deleted_at IS NULL',
       orderBy: 'created_at, id',
     );
     return rows.map(Collection.fromRow).toList();
+  }
+
+  Future<List<Collection>> listDeletedCollections() async {
+    final rows = await database.db.query(
+      'collections',
+      where: 'deleted_at IS NOT NULL',
+      orderBy: 'deleted_at DESC',
+    );
+    return rows.map(Collection.fromRow).toList();
+  }
+
+  Future<Collection?> getCollection(String id) async {
+    final rows = await database.db.query(
+      'collections',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    return rows.isEmpty ? null : Collection.fromRow(rows.single);
+  }
+
+  Future<Collection> renameCollection(String id, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      throw ArgumentError('Collection name cannot be empty.');
+    }
+    final count = await database.db.update(
+      'collections',
+      {'name': trimmed},
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [id],
+    );
+    if (count != 1) throw StateError('Active collection not found.');
+    return (await getCollection(id))!;
+  }
+
+  Future<Collection> softDeleteCollection(String id, {DateTime? at}) async {
+    if (id == Collection.defaultId) {
+      throw StateError('Default collection cannot be deleted.');
+    }
+    final now = (at ?? DateTime.now()).toUtc();
+    final count = await database.db.update(
+      'collections',
+      {'deleted_at': now.toIso8601String()},
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [id],
+    );
+    if (count != 1) throw StateError('Active collection not found.');
+    return (await getCollection(id))!;
+  }
+
+  Future<Collection> restoreCollection(String id, {DateTime? at}) async {
+    final now = (at ?? DateTime.now()).toUtc();
+    final collection = await getCollection(id);
+    if (collection?.deletedAt == null || !now.isBefore(collection!.purgeAt!)) {
+      throw StateError('This collection can no longer be restored.');
+    }
+    await database.db.update(
+      'collections',
+      {'deleted_at': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    return (await getCollection(id))!;
   }
 
   Future<Collection> createCollection(String name) async {
@@ -54,6 +118,8 @@ class CardRepository {
   }
 
   Future<List<MemoryCard>> listActiveCards(String collectionId) async {
+    final collection = await getCollection(collectionId);
+    if (collection == null || collection.deletedAt != null) return [];
     final rows = await database.db.query(
       'cards',
       where: 'collection_id = ? AND deleted_at IS NULL',
@@ -73,11 +139,12 @@ class CardRepository {
   }
 
   Future<List<MemoryCard>> listDeletedCards() async {
-    final rows = await database.db.query(
-      'cards',
-      where: 'deleted_at IS NOT NULL',
-      orderBy: 'deleted_at DESC',
-    );
+    final rows = await database.db.rawQuery('''
+      SELECT cards.* FROM cards
+      JOIN collections ON collections.id = cards.collection_id
+      WHERE cards.deleted_at IS NOT NULL AND collections.deleted_at IS NULL
+      ORDER BY cards.deleted_at DESC
+    ''');
     return rows.map(MemoryCard.fromRow).toList();
   }
 
@@ -100,7 +167,11 @@ class CardRepository {
     }
     final now = (at ?? DateTime.now()).toUtc();
     final current = await getCard(id);
+    final collection = current == null
+        ? null
+        : await getCollection(current.collectionId);
     if (current == null ||
+        collection?.deletedAt != null ||
         current.deletedAt != null ||
         !now.isBefore(current.editDeadline)) {
       throw StateError('This card can no longer be edited.');
@@ -176,6 +247,12 @@ class CardRepository {
       final rows = await txn.query('cards', where: 'id = ?', whereArgs: [id]);
       if (rows.isEmpty) throw StateError('Card not found.');
       final card = MemoryCard.fromRow(rows.single);
+      final collections = await txn.query(
+        'collections',
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [card.collectionId],
+      );
+      if (collections.isEmpty) throw StateError('Collection is deleted.');
       if (card.deletedAt == null || !now.isBefore(card.purgeAt!)) {
         throw StateError('This card can no longer be restored.');
       }
@@ -195,6 +272,23 @@ class CardRepository {
     );
     final expired = <MemoryCard>[];
     await database.db.transaction((txn) async {
+      final collections = await txn.query(
+        'collections',
+        columns: ['id'],
+        where: 'deleted_at IS NOT NULL AND deleted_at <= ?',
+        whereArgs: [cutoff.toIso8601String()],
+      );
+      for (final collection in collections) {
+        final id = collection['id']! as String;
+        final rows = await txn.query(
+          'cards',
+          where: 'collection_id = ?',
+          whereArgs: [id],
+        );
+        expired.addAll(rows.map(MemoryCard.fromRow));
+        await txn.delete('cards', where: 'collection_id = ?', whereArgs: [id]);
+        await txn.delete('collections', where: 'id = ?', whereArgs: [id]);
+      }
       final rows = await txn.query(
         'cards',
         where: 'deleted_at IS NOT NULL AND deleted_at <= ?',
@@ -225,6 +319,7 @@ class CardRepository {
     required DateTime photoDate,
     required PhotoDateSource photoDateSource,
     String? displayDate,
+    String? displayTime,
     String? text,
     File? recordedAudio,
     double? latitude,
@@ -256,6 +351,14 @@ class CardRepository {
         await recordedAudio.copy(audioTarget!.path);
       }
       await database.db.transaction((txn) async {
+        final collections = await txn.query(
+          'collections',
+          where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: [collectionId],
+        );
+        if (collections.isEmpty) {
+          throw StateError('Active collection not found.');
+        }
         await txn.insert('cards', {
           'id': id,
           'collection_id': collectionId,
@@ -263,6 +366,7 @@ class CardRepository {
           'display_date':
               displayDate ??
               '${photoDate.year.toString().padLeft(4, '0')}-${photoDate.month.toString().padLeft(2, '0')}-${photoDate.day.toString().padLeft(2, '0')}',
+          'display_time': displayTime,
           'photo_date_source': photoDateSource.name,
           'created_at': now.toIso8601String(),
           'updated_at': now.toIso8601String(),

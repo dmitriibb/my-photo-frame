@@ -49,6 +49,10 @@ class ArchiveExport {
     Collection collection, {
     Set<String>? cardIds,
   }) async {
+    final current = await repository.getCollection(collection.id);
+    if (current == null || current.deletedAt != null) {
+      throw StateError('This collection is no longer available for export.');
+    }
     final directory = await _scratch();
     try {
       final active = await repository.listActiveCards(collection.id);
@@ -124,6 +128,10 @@ class ArchiveExport {
     if (card == null || card.deletedAt != null) {
       throw StateError('This card is no longer available for export.');
     }
+    final collection = await repository.getCollection(card.collectionId);
+    if (collection == null || collection.deletedAt != null) {
+      throw StateError('This collection is no longer available for export.');
+    }
     final photo = repository.photoFile(card);
     final audio = repository.audioFile(card);
     final manifest = await _writeManifest(scratch, 'card_manifest.json', {
@@ -134,6 +142,7 @@ class ArchiveExport {
         'collection_id': card.collectionId,
         'photo_date': card.photoDate.toUtc().toIso8601String(),
         'display_date': card.displayDate,
+        'display_time': card.displayTime,
         'photo_date_source': card.photoDateSource.name,
         'created_at': card.createdAt.toUtc().toIso8601String(),
         'updated_at': card.updatedAt.toUtc().toIso8601String(),

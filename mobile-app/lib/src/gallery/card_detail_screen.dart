@@ -363,7 +363,7 @@ class _CardDetailScreenState extends State<CardDetailScreen>
                 children: [
                   Expanded(
                     child: Text(
-                      card.displayDate,
+                      '${card.displayDate}${card.displayTime == null ? '' : '  ${card.displayTime}'}',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),

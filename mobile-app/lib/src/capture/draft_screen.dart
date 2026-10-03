@@ -3,11 +3,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_cropper/image_cropper.dart';
 
 import '../data/card_repository.dart';
 import '../data/models.dart';
 import '../media/voice_draft.dart';
 import '../media/voice_playback_controls.dart';
+import '../media/photo_processor.dart';
 
 class DraftScreen extends StatefulWidget {
   const DraftScreen({
@@ -22,8 +24,11 @@ class DraftScreen extends StatefulWidget {
     required this.initialCollectionId,
     this.dateSource = PhotoDateSource.capture,
     this.displayDate,
+    this.displayTime,
     this.latitude,
     this.longitude,
+    this.originalImportPhoto,
+    this.importProgress,
   }) : assert((photo == null) != (photoFuture == null));
 
   final CardRepository repository;
@@ -36,8 +41,11 @@ class DraftScreen extends StatefulWidget {
   final String initialCollectionId;
   final PhotoDateSource dateSource;
   final String? displayDate;
+  final String? displayTime;
   final double? latitude;
   final double? longitude;
+  final File? originalImportPhoto;
+  final String? importProgress;
 
   @override
   State<DraftScreen> createState() => _DraftScreenState();
@@ -51,10 +59,19 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
   File? _photo;
   Object? _photoError;
   bool _locating = false;
+  bool _cropping = false;
   double? _latitude;
   double? _longitude;
   late String _collectionId;
   late Future<List<Collection>> _collections;
+
+  String get _photoDateLabel {
+    final day = widget.capturedAt;
+    final date =
+        widget.displayDate ??
+        '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+    return widget.displayTime == null ? date : '$date  ${widget.displayTime}';
+  }
 
   @override
   void initState() {
@@ -138,6 +155,13 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _addLocation() async {
+    if (widget.originalImportPhoto != null) {
+      setState(() {
+        _latitude = widget.latitude;
+        _longitude = widget.longitude;
+      });
+      return;
+    }
     if (_locating) return;
     setState(() => _locating = true);
     try {
@@ -171,8 +195,44 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _adjustCrop() async {
+    if (_cropping || _saving || widget.originalImportPhoto == null) return;
+    setState(() => _cropping = true);
+    File? replacement;
+    try {
+      final cropped = await ImageCropper().cropImage(
+        sourcePath: widget.originalImportPhoto!.path,
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Crop',
+            lockAspectRatio: true,
+            aspectRatioPresets: [CropAspectRatioPreset.square],
+          ),
+        ],
+      );
+      if (cropped == null) return;
+      replacement = await processCardPhoto(
+        File(cropped.path),
+        widget.draftsDirectory,
+      );
+      if (!mounted) return;
+      final previous = _photo;
+      setState(() => _photo = replacement);
+      replacement = null;
+      if (previous != null && await previous.exists()) await previous.delete();
+    } catch (error) {
+      _message('Could not crop photo: $error');
+    } finally {
+      if (replacement != null && await replacement.exists()) {
+        await replacement.delete();
+      }
+      if (mounted) setState(() => _cropping = false);
+    }
+  }
+
   Future<void> _save() async {
-    if (_saving || _voice.isStarting || _photo == null) return;
+    if (_saving || _cropping || _voice.isStarting || _photo == null) return;
     setState(() => _saving = true);
     try {
       if (_voice.isRecording) await _voice.release();
@@ -182,6 +242,7 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
         photoDate: widget.capturedAt,
         photoDateSource: widget.dateSource,
         displayDate: widget.displayDate,
+        displayTime: widget.displayTime,
         text: _text.text,
         recordedAudio: _voice.clip,
         latitude: _latitude,
@@ -217,12 +278,11 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final day = widget.capturedAt;
     return PopScope(
       canPop: !_saving,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('New memory'),
+          title: Text(widget.importProgress ?? 'New memory'),
           actions: [
             TextButton(
               onPressed: _saving
@@ -239,7 +299,8 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
             child: SizedBox(
               height: 48,
               child: FilledButton(
-                onPressed: _saving || _voice.isStarting || _photo == null
+                onPressed:
+                    _saving || _cropping || _voice.isStarting || _photo == null
                     ? null
                     : _save,
                 child: Row(
@@ -347,42 +408,61 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                       ),
+                      if (widget.originalImportPhoto != null)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: IconButton(
+                            tooltip: 'Adjust crop',
+                            onPressed: _cropping ? null : _adjustCrop,
+                            icon: _cropping
+                                ? const SizedBox.square(
+                                    dimension: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.crop),
+                          ),
+                        ),
                       const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
                             child: Text(
-                              widget.displayDate ??
-                                  '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}',
+                              _photoDateLabel,
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                           ),
-                          IconButton(
-                            tooltip: _latitude == null
-                                ? 'Add current location'
-                                : 'Remove location',
-                            onPressed: _locating
-                                ? null
-                                : _latitude == null
-                                ? _addLocation
-                                : () => setState(() {
-                                    _latitude = null;
-                                    _longitude = null;
-                                  }),
-                            icon: _locating
-                                ? const SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
+                          if (widget.originalImportPhoto == null ||
+                              widget.latitude != null)
+                            IconButton(
+                              tooltip: _latitude == null
+                                  ? widget.originalImportPhoto == null
+                                        ? 'Add current location'
+                                        : 'Restore photo location'
+                                  : 'Remove location',
+                              onPressed: _locating
+                                  ? null
+                                  : _latitude == null
+                                  ? _addLocation
+                                  : () => setState(() {
+                                      _latitude = null;
+                                      _longitude = null;
+                                    }),
+                              icon: _locating
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : Icon(
+                                      _latitude == null
+                                          ? Icons.location_off_outlined
+                                          : Icons.location_on,
                                     ),
-                                  )
-                                : Icon(
-                                    _latitude == null
-                                        ? Icons.location_off_outlined
-                                        : Icons.location_on,
-                                  ),
-                          ),
+                            ),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -442,29 +522,32 @@ class _DraftScreenState extends State<DraftScreen> with WidgetsBindingObserver {
                 ),
               ),
               const SizedBox(height: 16),
-              FutureBuilder<List<Collection>>(
-                future: _collections,
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const LinearProgressIndicator();
-                  return DropdownButtonFormField<String>(
-                    initialValue: _collectionId,
-                    decoration: const InputDecoration(
-                      labelText: 'Collection',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: [
-                      for (final collection in snapshot.data!)
-                        DropdownMenuItem(
-                          value: collection.id,
-                          child: Text(collection.name),
-                        ),
-                    ],
-                    onChanged: (id) {
-                      if (id != null) setState(() => _collectionId = id);
-                    },
-                  );
-                },
-              ),
+              if (widget.importProgress == null)
+                FutureBuilder<List<Collection>>(
+                  future: _collections,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const LinearProgressIndicator();
+                    }
+                    return DropdownButtonFormField<String>(
+                      initialValue: _collectionId,
+                      decoration: const InputDecoration(
+                        labelText: 'Collection',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final collection in snapshot.data!)
+                          DropdownMenuItem(
+                            value: collection.id,
+                            child: Text(collection.name),
+                          ),
+                      ],
+                      onChanged: (id) {
+                        if (id != null) setState(() => _collectionId = id);
+                      },
+                    );
+                  },
+                ),
             ],
           ),
         ),

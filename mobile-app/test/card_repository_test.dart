@@ -45,12 +45,14 @@ void main() {
       processedPhoto: samplePhoto,
       photoDate: photoDate,
       photoDateSource: PhotoDateSource.capture,
+      displayTime: '16:30',
       text: '  Summer afternoon  ',
     );
     expect(await repository.photoFile(saved).exists(), isTrue);
     expect(saved.text, 'Summer afternoon');
     expect(saved.photoDate, photoDate);
     expect(saved.displayDate, '2025-07-10');
+    expect(saved.displayTime, '16:30');
     expect(saved.editDeadline, saved.createdAt.add(const Duration(hours: 24)));
 
     await database.close();
@@ -63,6 +65,7 @@ void main() {
     expect(cards, hasLength(1));
     expect(cards.single.id, saved.id);
     expect(cards.single.displayDate, '2025-07-10');
+    expect(cards.single.displayTime, '16:30');
     expect(
       await repository.photoFile(cards.single).readAsBytes(),
       await samplePhoto.readAsBytes(),
@@ -81,7 +84,7 @@ void main() {
         photoDate: DateTime.utc(2025),
         photoDateSource: PhotoDateSource.capture,
       ),
-      throwsA(isA<Exception>()),
+      throwsA(isA<StateError>()),
     );
     expect(Directory(p.join(documents.path, 'photos')).listSync(), isEmpty);
     expect(await repository.listActiveCards(Collection.defaultId), isEmpty);
@@ -103,6 +106,66 @@ void main() {
       throwsA(isA<Exception>()),
     );
   });
+
+  test(
+    'collection rename, delete, restore, and expiry retain private media correctly',
+    () async {
+      final collection = await repository.createCollection('Italy trip');
+      final renamed = await repository.renameCollection(
+        collection.id,
+        'Summer trip',
+      );
+      expect(renamed.name, 'Summer trip');
+      final photo = File(p.join(documents.path, 'sample.jpg'));
+      await photo.writeAsBytes(
+        image.encodeJpg(image.Image(width: 2, height: 2)),
+      );
+      final card = await repository.saveCard(
+        collectionId: collection.id,
+        processedPhoto: photo,
+        photoDate: DateTime.utc(2025),
+        photoDateSource: PhotoDateSource.capture,
+      );
+      final deleted = await repository.softDeleteCollection(
+        collection.id,
+        at: DateTime.utc(2026, 1, 1),
+      );
+      expect(await repository.listCollections(), hasLength(1));
+      expect(await repository.listDeletedCollections(), hasLength(1));
+      expect(await repository.listActiveCards(collection.id), isEmpty);
+      expect(await repository.photoFile(card).exists(), isTrue);
+      await expectLater(
+        repository.saveCard(
+          collectionId: collection.id,
+          processedPhoto: photo,
+          photoDate: DateTime.utc(2025),
+          photoDateSource: PhotoDateSource.capture,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      await repository.restoreCollection(
+        collection.id,
+        at: deleted.purgeAt!.subtract(const Duration(milliseconds: 1)),
+      );
+      expect(await repository.listActiveCards(collection.id), hasLength(1));
+      final deletedAgain = await repository.softDeleteCollection(
+        collection.id,
+        at: DateTime.utc(2026, 2, 1),
+      );
+      await expectLater(
+        repository.restoreCollection(collection.id, at: deletedAgain.purgeAt),
+        throwsA(isA<StateError>()),
+      );
+      expect(await repository.purgeExpired(at: deletedAgain.purgeAt), 1);
+      expect(await repository.getCollection(collection.id), isNull);
+      expect(await repository.getCard(card.id), isNull);
+      expect(await repository.photoFile(card).exists(), isFalse);
+      await expectLater(
+        repository.softDeleteCollection(Collection.defaultId),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
 
   test(
     'optional fields can change before 24 hours and not at the deadline',

@@ -39,6 +39,7 @@ void main() {
             photoDate: DateTime.utc(2024, 1, 2),
             photoDateSource: PhotoDateSource.exif,
             displayDate: '2024-01-01',
+            displayTime: '23:30',
             text: 'Saved memory',
             recordedAudio: audio,
             latitude: 52.5,
@@ -93,6 +94,10 @@ void main() {
             expect(
               (manifest['card'] as Map<String, dynamic>)['display_date'],
               '2024-01-01',
+            );
+            expect(
+              (manifest['card'] as Map<String, dynamic>)['display_time'],
+              '23:30',
             );
             expect(
               (manifest['card'] as Map<String, dynamic>)['text'],

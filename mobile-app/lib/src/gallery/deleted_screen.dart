@@ -13,20 +13,29 @@ class DeletedScreen extends StatefulWidget {
 }
 
 class _DeletedScreenState extends State<DeletedScreen> {
-  late Future<List<MemoryCard>> _cards;
+  late Future<(List<Collection>, List<MemoryCard>)> _deleted;
 
   @override
   void initState() {
     super.initState();
-    _cards = widget.repository.listDeletedCards();
+    _refresh();
   }
+
+  void _refresh() {
+    _deleted = _loadDeleted();
+  }
+
+  Future<(List<Collection>, List<MemoryCard>)> _loadDeleted() async => (
+    await widget.repository.listDeletedCollections(),
+    await widget.repository.listDeletedCards(),
+  );
 
   Future<void> _restore(MemoryCard card) async {
     try {
       await widget.repository.restoreCard(card.id);
       if (mounted) {
         setState(() {
-          _cards = widget.repository.listDeletedCards();
+          _refresh();
         });
       }
     } catch (error) {
@@ -38,13 +47,26 @@ class _DeletedScreenState extends State<DeletedScreen> {
     }
   }
 
+  Future<void> _restoreCollection(Collection collection) async {
+    try {
+      await widget.repository.restoreCollection(collection.id);
+      if (mounted) setState(_refresh);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not restore collection: $error')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Deleted')),
     body: SafeArea(
       top: false,
-      child: FutureBuilder<List<MemoryCard>>(
-        future: _cards,
+      child: FutureBuilder<(List<Collection>, List<MemoryCard>)>(
+        future: _deleted,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(
@@ -54,54 +76,82 @@ class _DeletedScreenState extends State<DeletedScreen> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.data!.isEmpty) {
-            return const Center(child: Text('No deleted cards.'));
+          final (collections, cards) = snapshot.data!;
+          if (collections.isEmpty && cards.isEmpty) {
+            return const Center(
+              child: Text('No deleted cards or collections.'),
+            );
           }
-          return ListView.builder(
+          return ListView(
             padding: const EdgeInsets.all(16),
-            itemCount: snapshot.data!.length,
-            itemBuilder: (context, index) {
-              final card = snapshot.data![index];
-              final purgeDay = card.purgeAt!.toLocal();
-              return Card(
-                color: Colors.white,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 88,
-                        height: 88,
-                        child: Image.file(
-                          widget.repository.photoFile(card),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final collection in collections)
+                Card(
+                  color: Colors.white,
+                  child: ListTile(
+                    leading: const Icon(Icons.collections_outlined),
+                    title: Text(collection.name),
+                    subtitle: Text(
+                      'Removed after ${_date(collection.purgeAt!)}',
+                    ),
+                    trailing: TextButton(
+                      onPressed: () => _restoreCollection(collection),
+                      child: const Text('Restore'),
+                    ),
+                  ),
+                ),
+              for (final card in cards)
+                Builder(
+                  builder: (context) {
+                    final purgeDay = card.purgeAt!.toLocal();
+                    return Card(
+                      color: Colors.white,
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
                           children: [
-                            Text(card.displayDate),
-                            Text(
-                              'Removed after ${purgeDay.year}-${purgeDay.month.toString().padLeft(2, '0')}-${purgeDay.day.toString().padLeft(2, '0')}',
-                              style: Theme.of(context).textTheme.bodySmall,
+                            SizedBox(
+                              width: 88,
+                              height: 88,
+                              child: Image.file(
+                                widget.repository.photoFile(card),
+                                fit: BoxFit.cover,
+                              ),
                             ),
-                            TextButton(
-                              onPressed: () => _restore(card),
-                              child: const Text('Restore'),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(card.displayDate),
+                                  Text(
+                                    'Removed after ${_date(purgeDay)}',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
+                                  TextButton(
+                                    onPressed: () => _restore(card),
+                                    child: const Text('Restore'),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
                       ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              );
-            },
+            ],
           );
         },
       ),
     ),
   );
+
+  String _date(DateTime date) {
+    final local = date.toLocal();
+    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+  }
 }

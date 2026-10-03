@@ -8,6 +8,7 @@ class ImportMetadata {
   const ImportMetadata({
     required this.photoDate,
     required this.displayDate,
+    this.displayTime,
     required this.dateSource,
     this.latitude,
     this.longitude,
@@ -15,6 +16,7 @@ class ImportMetadata {
 
   final DateTime photoDate;
   final String displayDate;
+  final String? displayTime;
   final PhotoDateSource dateSource;
   final double? latitude;
   final double? longitude;
@@ -50,6 +52,9 @@ Future<ImportMetadata> readImportMetadata(File file) async {
   return ImportMetadata(
     photoDate: date ?? importedAt,
     displayDate: displayDate,
+    displayTime: date == null
+        ? null
+        : (raw['date'] as String).substring(11, 16),
     dateSource: date == null
         ? PhotoDateSource.importFallback
         : PhotoDateSource.exif,

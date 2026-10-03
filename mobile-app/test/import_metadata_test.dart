@@ -29,6 +29,7 @@ void main() {
           );
       final metadata = await readImportMetadata(File('unused'));
       expect(metadata.displayDate, '2023-12-31');
+      expect(metadata.displayTime, '23:30');
       expect(metadata.photoDate.toUtc(), DateTime.utc(2024, 1, 1, 4, 30));
       expect(metadata.dateSource, PhotoDateSource.exif);
       expect(metadata.latitude, 52.5);

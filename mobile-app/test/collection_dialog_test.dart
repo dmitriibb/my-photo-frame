@@ -59,6 +59,28 @@ void main() {
       closeTo(tester.getSize(find.byType(Scaffold).first).width / 2, 1),
     );
 
+    await tester.tap(find.byTooltip('Actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Collection'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add new'), findsOneWidget);
+    await tester.tap(find.text('Italy trip').last);
+    await tester.pumpAndSettle();
+    for (final action in [
+      'Delete',
+      'Export to ZIP',
+      'Export to gallery',
+      'Rename',
+    ]) {
+      expect(find.text(action), findsOneWidget);
+    }
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), 'Summer trip');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Summer trip'), findsOneWidget);
+
     await tester.tap(find.byTooltip('Menu'));
     await tester.pumpAndSettle();
     for (final item in ['Home', 'Import', 'Export', 'Deleted', 'Info']) {
@@ -120,7 +142,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('No deleted cards.'), findsOneWidget);
+    expect(find.text('No deleted cards or collections.'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await tester.runAsync(() async {
       await database.close();

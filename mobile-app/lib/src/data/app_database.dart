@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 class AppDatabase {
   AppDatabase._(this.db);
 
-  static const schemaVersion = 2;
+  static const schemaVersion = 4;
   final Database db;
 
   static Future<AppDatabase> open(
@@ -70,6 +70,12 @@ class AppDatabase {
         CREATE UNIQUE INDEX collection_name_unique
         ON collections(name COLLATE NOCASE)
       ''');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE cards ADD COLUMN display_time TEXT');
+    }
+    if (oldVersion < 4) {
+      await db.execute('ALTER TABLE collections ADD COLUMN deleted_at TEXT');
     }
   }
 
